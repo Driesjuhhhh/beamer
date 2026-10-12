@@ -44,6 +44,23 @@ def position(widget, root):
 
 
 class CrossingPageParityTests(unittest.TestCase):
+    def test_identify_screens_requests_local_and_linked_identification_without_saving(self):
+        from unittest.mock import patch
+        from core import protocol
+
+        before = self.path.read_bytes()
+        peer = bytes([1])*16
+        with patch.object(self.window, '_show_screen_numbers') as local, \
+                patch.object(self.window, '_peer_caps', return_value={peer: {'settings'}}), \
+                patch.object(self.window, '_send_to') as send:
+            self.window.identify_screens_button.click()
+        local.assert_called_once()
+        send.assert_called_once_with(peer, protocol.settings_msg({'identify_screens': True}))
+        with patch.object(self.window, '_show_screen_numbers') as remote:
+            self.window._on_settings(self.peers[0]['id'], {'identify_screens': True})
+        remote.assert_called_once()
+        self.assertEqual(self.path.read_bytes(), before)
+
     def test_drop_of_local_screen_is_saved_by_the_application(self):
         import copy
 

@@ -2608,6 +2608,9 @@ class ControlWindow(AppKit.NSObject):
         peer_id = protocol.id_text(peer) if isinstance(peer, bytes) else peer
         if peer_id is not None and peer_id not in {entry.get("id") for entry in peerlist.desktops(self.controller.book.peers())}:
             return
+        if isinstance(data, dict) and data.get("identify_screens") is True:
+            self._show_screen_numbers()
+            return
         settings = copy.deepcopy(self.settings_store.current())
         cfg = self.controller.cfg
         taken = settings_sync.arrived(data, cfg.same_set_at, KEY_NAME_TO_CODE, by_here=cfg.same_by,
@@ -3150,7 +3153,15 @@ class ControlWindow(AppKit.NSObject):
     @objc.python_method
     def _ways_module(self):
         module = widgets.Module()
-        module.add(widgets.Label("Machines", theme.TYPE["body"], 600).view)
+        header = widgets.stack(False, 8)
+        header.addArrangedSubview_(widgets.Label("Machines", theme.TYPE["body"], 600).view)
+        spacer = AppKit.NSView.alloc().init()
+        spacer.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        spacer.setContentHuggingPriority_forOrientation_(1, AppKit.NSLayoutConstraintOrientationHorizontal)
+        header.addArrangedSubview_(spacer)
+        self.identify_screens_button = widgets.Button("Identify screens", self, "identifyScreens:")
+        header.addArrangedSubview_(self.identify_screens_button.view)
+        module.add(header)
         self.atlas_canvas = diagram.AtlasCanvas.alloc().init().setup()
         self.arrangement_diagram = self.atlas_canvas
         self.atlas_canvas.on_layout_change = self._atlas_layout_changed
@@ -3160,7 +3171,7 @@ class ControlWindow(AppKit.NSObject):
         self.atlas_canvas.on_cycle_change = self._set_shortcut_cycle
         self.atlas_canvas.on_leave_out = lambda peer: self._set_atlas_left_out(peer, True)
         module.add(self.atlas_canvas)
-        self.atlas_canvas_hint = widgets.note("Option-click a display to split or group · drag to move · click a third of a lit edge to leave it out")
+        self.atlas_canvas_hint = widgets.note("Drag individual screens to arrange them · nearby edges snap lightly")
         module.add(self.atlas_canvas_hint.view)
         module.body.setCustomSpacing_afterView_(8, self.atlas_canvas)
         crosses = widgets.Label("●  Crosses", theme.TYPE["note"], 500, "signal").view
@@ -3177,6 +3188,19 @@ class ControlWindow(AppKit.NSObject):
         module.add(self.crossing_ledger)
         module.add(widgets.note("Three lit segments are the whole edge; click one to leave it out. A corner is a diagonal push, shown as a square on the map. The notch is this Mac only.").view)
         return module
+
+    @objc.python_method
+    def _show_screen_numbers(self):
+        from screen_identify import ScreenIdentifier
+        if not hasattr(self, "_screen_identifier"):
+            self._screen_identifier = ScreenIdentifier()
+        settings = self.settings_store.current()
+        tile = core_ways.derive_layout(settings).get(settings["machine_id"], {})
+        self._screen_identifier.show(tile, settings.get("name") or socket.gethostname().split(".")[0])
+
+    def identifyScreens_(self, _sender):
+        self._show_screen_numbers()
+        self._send_same(data={"identify_screens": True})
 
     @objc.python_method
     def _pointer_module(self):

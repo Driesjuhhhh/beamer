@@ -28,6 +28,7 @@ setup(
         "dock_visibility",
         "diagram",
         "effects_overlay",
+        "screen_identify",
         "gestures",
         "hardware_mac",
         "ignored_titles",

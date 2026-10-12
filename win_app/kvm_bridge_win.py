@@ -1653,6 +1653,9 @@ class WindowsApplication(QWidget):
         that takes it, which stops the first time it meets a copy it already holds."""
         if self._config is None or any(entry.get("id") == peer and entry.get("port") == 0 for entry in self.book.peers()):
             return
+        if isinstance(data, dict) and data.get("identify_screens") is True:
+            self._show_screen_numbers()
+            return
         settings = app_config.load_settings(self.config_path)
         config = self._config
         taken = settings_sync.arrived(data, config.same_set_at, TRIGGER_KEYS, by_here=config.same_by,
@@ -1885,6 +1888,14 @@ class WindowsApplication(QWidget):
         from crossing_ledger import CrossingLedger
         module = widgets.Module("Machines", heading=True)
         self.ways_module = module
+        module.body.removeWidget(module.eyebrow)
+        header = QHBoxLayout()
+        header.addWidget(module.eyebrow)
+        header.addStretch()
+        self.identify_screens_button = QPushButton("Identify screens")
+        self.identify_screens_button.clicked.connect(self._identify_screens)
+        header.addWidget(self.identify_screens_button)
+        module.body.insertLayout(0, header)
         self.atlas_canvas = AtlasCanvas(
             on_drop=self._layout_dropped, on_rename=self._rename_canvas_peer,
             on_leave_out=self._canvas_left_out, on_cycle=self._set_shortcut_cycle,
@@ -1895,7 +1906,7 @@ class WindowsApplication(QWidget):
         self.atlas_canvas.ledger_height = True
         module.body.addWidget(self.atlas_canvas)
         self.atlas_canvas_hint = widgets.label(
-            "Alt-click a display to split or group · drag to move · click a third of a lit edge to leave it out",
+            "Drag individual screens to arrange them · nearby edges snap lightly",
             "note", wrap=True)
         module.body.addWidget(self.atlas_canvas_hint)
         if sys.platform.startswith("linux"):
@@ -1958,6 +1969,20 @@ class WindowsApplication(QWidget):
 
     def _crossing_machines(self) -> list:
         return [(ident, self._shown(label)) for ident, label in pages_win.crossing_machines(self._peer_entries)]
+
+    def _show_screen_numbers(self):
+        from screen_identify import ScreenIdentifier
+        if not hasattr(self, "_screen_identifier"):
+            self._screen_identifier = ScreenIdentifier(self)
+        settings = self._crossing_settings()
+        tile = ways.derive_layout(settings).get(self._config.machine_id, {})
+        self._screen_identifier.show(tile, self._config.name or platform.node())
+
+    def _identify_screens(self):
+        self._show_screen_numbers()
+        for peer, caps in self._peer_caps().items():
+            if "settings" in caps:
+                self._send_to(peer, protocol.settings_msg({"identify_screens": True}))
 
     def _chosen_machine(self) -> Optional[str]:
         ids = [entry.get("id") for entry in peerlist.desktops(self._peer_entries)]

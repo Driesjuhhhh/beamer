@@ -98,6 +98,8 @@ Once screen information is available, both desktop apps use the same screen-only
 machine-size outlines, thirds grid or old corner overlays. For example, two screens belonging
 to PC A and two to PC B can be arranged as A–B–A with the second B below the middle screen;
 a third PC can be placed anywhere in the same map. Status refreshes preserve a screen being dragged.
+The **Identify screens** button at the top right briefly shows each screen's machine name and
+matching screen number, on this machine and directly linked machines running this version.
 
 In your own appearance: light if your GitHub is light, dark if it is dark.
 

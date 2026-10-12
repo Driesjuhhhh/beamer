@@ -1436,6 +1436,11 @@ followed while it is away; with none, the page says so in one line. A linked mac
 advertise `design_sync` is shown unavailable with “Needs beta.6 or later”. Eligibility is the
 capability alone; the `app` version string is never compared.
 
+An identification request uses `settings` with only `{"identify_screens": true}`. It asks the
+directly linked desktop to show its own machine name and Crossing screen numbers for four seconds.
+It is transient: the receiver neither saves settings nor forwards this request. Older desktops
+ignore the unknown member. This request does not depend on Same on all machines being enabled.
+
 The optional `design_sync` member is independent of `on`. A capable machine sends its own current
 Design state to each directly linked capable peer after link-up and whenever its Design changes,
 even while Same on all machines is off. The state is:
