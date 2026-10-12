@@ -360,6 +360,12 @@ class AtlasCanvas(QWidget):
         self.states = {}
         self.selected = None
         self.selected_display = None
+        self.identifying = False
+        self._resizing = False
+        self._size_start = None
+        self._identify_timer = QTimer(self)
+        self._identify_timer.setSingleShot(True)
+        self._identify_timer.timeout.connect(self._end_identify)
         self.own_id = None
         self.shelf_ids = set()
         self.left_out_ids = set()
@@ -969,6 +975,16 @@ class AtlasCanvas(QWidget):
             return self.display_rect(peer, ways._display_frames(self.tiles[peer])[0]["display"])
         return self.tile_rect(peer)
 
+    def identify(self, labels=None):
+        self.identifying = True
+        self._identify_labels = dict(labels or {})
+        self._identify_timer.start(4000)
+        self.update()
+
+    def _end_identify(self):
+        self.identifying = False
+        self.update()
+
     def _paint_screen_scene(self, painter):
         active = {peer: tile for peer, tile in self.tiles.items() if peer not in self.shelf_ids}
         cards, seams = ways.screen_scene(active)
@@ -978,10 +994,12 @@ class AtlasCanvas(QWidget):
                            (position[1]-top)*self._scale+self._origin.y())
         for card in cards:
             peer, display, frame = card["machine"], card["display"], card["frame"]
+            identifying = self.identifying and peer in self._identify_labels
             rect = QRectF(point((frame["x"], frame["y"])), QSizeF(frame["w"]*self._scale, frame["h"]*self._scale))
             selected = self.selected_display == (peer, display)
             painter.setBrush(_colour("well" if peer == self._own_id() else "panel"))
-            painter.setPen(QPen(_colour("ink_2" if selected else "edge"), 2 if selected else 1))
+            painter.setPen(QPen(_colour("signal" if identifying else "ink_2" if selected else "edge"),
+                                2 if selected or identifying else 1))
             painter.drawRoundedRect(rect.adjusted(.5, .5, -.5, -.5), 4, 4)
             title = f"{self.labels.get(peer, 'Machine')} · Screen {card['number']}"
             painter.setFont(theme.font(tokens.TYPE["body"], 650))
@@ -993,7 +1011,12 @@ class AtlasCanvas(QWidget):
             status = self.states.get(peer, {}).get("detail", "")
             if display is None:
                 status = "Waiting for screen information"
-            if rect.height() >= 56:
+            if identifying:
+                painter.setFont(theme.font(min(36, max(18, rect.height()/3)), 650))
+                painter.setPen(_colour("signal"))
+                tag = self._identify_labels.get(peer, '')
+                painter.drawText(rect.adjusted(8, 26, -8, -4), Qt.AlignmentFlag.AlignCenter, f"{tag}{card['number']}")
+            elif rect.height() >= 56:
                 painter.drawText(rect.adjusted(8, 31, -8, -8), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
                                  painter.fontMetrics().elidedText(status, Qt.TextElideMode.ElideRight, max(1, round(rect.width()-16))))
             if card["number"] == 1 and self._shows_cycle(peer):
@@ -1005,6 +1028,11 @@ class AtlasCanvas(QWidget):
                 if ticked:
                     painter.setPen(_colour("ground"))
                     painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "✓")
+            if display is not None:
+                painter.setPen(QPen(_colour("ink_3"), 1.2))
+                for inset in (5, 9):
+                    painter.drawLine(QPointF(rect.right()-inset-5, rect.bottom()-5),
+                                     QPointF(rect.right()-5, rect.bottom()-inset-5))
         self.corner_marks = []
         for seam in seams:
             one, two = seam["one"]["machine"], seam["two"]["machine"]
@@ -1037,6 +1065,9 @@ class AtlasCanvas(QWidget):
                 self.selected_display = (display_peer, display)
                 self._drag = display_peer
                 self._drag_display = display
+                screen_rect = self.display_rect(display_peer, display)
+                self._resizing = abs(point.x()-screen_rect.right()) <= 12 and abs(point.y()-screen_rect.bottom()) <= 12
+                self._size_start = next(frame for frame in ways._display_frames(self.tiles[display_peer]) if frame["display"] == display)
                 self._dragged_display = False
                 self._display_offset_start = dict(offsets.get(display, {"x": 0, "y": 0}))
                 self._split_on_release = False
@@ -1080,9 +1111,20 @@ class AtlasCanvas(QWidget):
 
     def mouseMoveEvent(self, event):
         if self._drag:
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor if self._resizing else Qt.CursorShape.ClosedHandCursor)
             delta = event.position() - self._drag_start
             if self._drag_display is not None:
+                if self._resizing:
+                    active = {peer: item for peer, item in self.tiles.items() if peer not in self.shelf_ids}
+                    resized = ways.resize_screen_layout(active, self._drag, self._drag_display,
+                                                        self._size_start["w"]+delta.x()/self._scale,
+                                                        self._size_start["h"]+delta.y()/self._scale,
+                                                        ways.SCREEN_SNAP_PX/max(self._scale, .001))
+                    self.tiles[self._drag] = resized[self._drag]
+                    self._dragged_display = self._dragged_display or not delta.isNull()
+                    self.update()
+                    event.accept()
+                    return
                 tile = self.tiles[self._drag]
                 offsets = dict(tile.get("display_offsets", {}))
                 offsets[self._drag_display] = {
@@ -1123,6 +1165,11 @@ class AtlasCanvas(QWidget):
                            else Qt.CursorShape.ArrowCursor)
         if hovered and self._shows_cycle(hovered) and self._cycle_hit_rect(self.cycle_rect(hovered)).contains(event.position()):
             QToolTip.showText(self.mapToGlobal(event.position().toPoint()), "In the shortcut's cycle", self)
+        if hovered is not None and _display is not None:
+            rect = self.display_rect(hovered, _display)
+            if abs(event.position().x()-rect.right()) <= 12 and abs(event.position().y()-rect.bottom()) <= 12:
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                self.setToolTip("Drag to resize this screen")
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -1141,6 +1188,7 @@ class AtlasCanvas(QWidget):
             split_on_release = self._split_on_release
             group_on_release = self._group_on_release
             self._drag = None
+            self._resizing = False
             self._drag_display = None
             self._display_offset_start = None
             self._dragged_display = False

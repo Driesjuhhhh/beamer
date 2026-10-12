@@ -2609,7 +2609,7 @@ class ControlWindow(AppKit.NSObject):
         if peer_id is not None and peer_id not in {entry.get("id") for entry in peerlist.desktops(self.controller.book.peers())}:
             return
         if isinstance(data, dict) and data.get("identify_screens") is True:
-            self._show_screen_numbers()
+            self._handle_identify(data, protocol.read_id(peer_id) if peer_id else None)
             return
         settings = copy.deepcopy(self.settings_store.current())
         cfg = self.controller.cfg
@@ -3171,7 +3171,7 @@ class ControlWindow(AppKit.NSObject):
         self.atlas_canvas.on_cycle_change = self._set_shortcut_cycle
         self.atlas_canvas.on_leave_out = lambda peer: self._set_atlas_left_out(peer, True)
         module.add(self.atlas_canvas)
-        self.atlas_canvas_hint = widgets.note("Drag individual screens to arrange them · nearby edges snap lightly")
+        self.atlas_canvas_hint = widgets.note("Drag to move · drag a screen's lower-right corner to resize · Identify screens shows matching numbers")
         module.add(self.atlas_canvas_hint.view)
         module.body.setCustomSpacing_afterView_(8, self.atlas_canvas)
         crosses = widgets.Label("●  Crosses", theme.TYPE["note"], 500, "signal").view
@@ -3190,17 +3190,37 @@ class ControlWindow(AppKit.NSObject):
         return module
 
     @objc.python_method
-    def _show_screen_numbers(self):
+    def _show_screen_numbers(self, labels=None):
         from screen_identify import ScreenIdentifier
         if not hasattr(self, "_screen_identifier"):
             self._screen_identifier = ScreenIdentifier()
         settings = self.settings_store.current()
         tile = core_ways.derive_layout(settings).get(settings["machine_id"], {})
-        self._screen_identifier.show(tile, settings.get("name") or socket.gethostname().split(".")[0])
+        self._screen_identifier.show(tile, settings.get("name") or socket.gethostname().split(".")[0],
+                                     (labels or {}).get(settings["machine_id"]))
+        self.atlas_canvas.identify(labels or {settings['machine_id']: ''})
 
     def identifyScreens_(self, _sender):
-        self._show_screen_numbers()
-        self._send_same(data={"identify_screens": True})
+        from core import screen_identify
+        connected = {peer for peer in self.atlas_canvas.tiles if self._live(peer)}
+        excluded = {peer for peer, state in self.atlas_canvas.states.items() if state.get('in_use') is False}
+        machines = screen_identify.eligible_machines(self.atlas_canvas.tiles, self.own_id(), connected, excluded)
+        self._handle_identify(screen_identify.request(machines))
+
+    @objc.python_method
+    def _handle_identify(self, data, source=None):
+        from core import screen_identify
+        if not hasattr(self, "_identify_requests"):
+            self._identify_requests = screen_identify.Requests()
+        if not self._identify_requests.accept(data):
+            return
+        labels = data.get('identify_labels')
+        if labels is not None and self.own_id() not in labels:
+            return
+        self._show_screen_numbers(data.get("identify_labels"))
+        forwarded = screen_identify.relay(data)
+        if forwarded is not None:
+            self._send_same(data=forwarded, source=source)
 
     @objc.python_method
     def _pointer_module(self):

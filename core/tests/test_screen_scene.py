@@ -17,6 +17,20 @@ def mixed_layout():
 
 
 class ScreenSceneTests(unittest.TestCase):
+    def test_resizing_keeps_other_screens_and_native_geometry_unchanged(self):
+        layout = mixed_layout()
+        before = copy.deepcopy(layout)
+        resized = ways.resize_screen_layout(layout, 'B', 'b2', 145, 70)
+        self.assertEqual(ways._display_frames(resized['B'])[1],
+                         dict(display='b2', x=100, y=100, w=145, h=70))
+        self.assertEqual(ways._display_frames(resized['B'])[0], ways._display_frames(layout['B'])[0])
+        self.assertEqual(resized['B']['displays'], layout['B']['displays'])
+        self.assertEqual(resized['A'], layout['A'])
+        self.assertEqual(layout, before)
+        self.assertTrue(ways._valid_tile_displays(resized['B']))
+        self.assertEqual(ways.resize_screen_layout(layout, 'B', 'b2', -100, 9000)['B']['display_sizes']['b2'],
+                         dict(w=40, h=4096))
+
     def test_nearby_edges_align_flush_without_a_distant_jump(self):
         target = dict(x=0, y=0, w=100, h=100)
         for screen, expected in (

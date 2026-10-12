@@ -404,6 +404,8 @@ class AtlasCanvas(AppKit.NSView):
         self.older = set()
         self.selected = None
         self.selected_display = None
+        self.identifying = False
+        self._identify_generation = 0
         self.own_id = ""
         self.cycle = {}
         self.cycle_enabled = False
@@ -711,6 +713,20 @@ class AtlasCanvas(AppKit.NSView):
             self._draw(False)
 
     @objc.python_method
+    def identify(self, labels=None):
+        from PyObjCTools import AppHelper
+        self.identifying = True
+        self._identify_labels = dict(labels or {})
+        self._identify_generation += 1
+        generation = self._identify_generation
+        self._draw(False)
+        def finish():
+            if generation == self._identify_generation:
+                self.identifying = False
+                self._draw(False)
+        AppHelper.callLater(4, finish)
+
+    @objc.python_method
     def _screen_view_frame(self, key, display, frames=None, scale=None):
         if frames is None:
             frames, scale = self._map()
@@ -742,6 +758,7 @@ class AtlasCanvas(AppKit.NSView):
                 layer.setHidden_(True)
         for card in cards:
             key, display, number = card["machine"], card["display"], card["number"]
+            identifying = self.identifying and key in self._identify_labels
             frame = self._screen_view_frame(key, display, frames, scale)
             layers = self.display_layers.setdefault(key, [])
             while len(layers) < number:
@@ -755,12 +772,12 @@ class AtlasCanvas(AppKit.NSView):
                 layer.addSublayer_(_text_layer(11, "ink_3"))
             selected = self.selected_display == (key, display)
             layer.setHidden_(False)
-            layer.setBorderWidth_(2 if selected else 1)
+            layer.setBorderWidth_(2 if selected or identifying else 1)
             layer.setCornerRadius_(4)
             layer.setZPosition_(10)
             _set_layer_frame_if_changed(layer, _rect(frame))
             theme.tint(layer, background="well" if key == self.own_id else "panel",
-                       border="ink_2" if selected else "edge")
+                       border="signal" if identifying else "ink_2" if selected else "edge")
             title, detail = layer.sublayers()[:2]
             name = f"{self.labels.get(key, 'Machine')} · Screen {number}"
             title.setString_(name)
@@ -773,8 +790,33 @@ class AtlasCanvas(AppKit.NSView):
             if display is None:
                 text = "Waiting for screen information"
             detail.setString_(text)
+            detail.setFont_(theme.font(11, 400))
+            detail.setFontSize_(11)
+            theme.tint(detail, foreground="ink_3")
             detail.setHidden_(frame[3] < 56)
             _set_layer_frame_if_changed(detail, ((6, 29), (max(1, frame[2]-16), 18)))
+            if identifying:
+                size = min(36, max(18, frame[3]/3))
+                detail.setString_(f"{self._identify_labels.get(key, '')}{number}")
+                detail.setFont_(theme.font(size, 650))
+                detail.setFontSize_(size)
+                detail.setHidden_(False)
+                theme.tint(detail, foreground="signal")
+                _set_layer_frame_if_changed(detail, ((6, max(25, (frame[3]-size)/2)),
+                                                       (max(1, frame[2]-12), size+8)))
+            if len(layer.sublayers()) < 3:
+                handle = Quartz.CAShapeLayer.layer()
+                handle.setFillColor_(AppKit.NSColor.clearColor().CGColor())
+                handle.setLineWidth_(1.2)
+                layer.addSublayer_(handle)
+            handle = layer.sublayers()[2]
+            handle.setHidden_(display is None)
+            handle.setStrokeColor_(theme.cg("ink_3"))
+            grip = Quartz.CGPathCreateMutable()
+            for inset in (5, 9):
+                Quartz.CGPathMoveToPoint(grip, None, frame[2]-inset-5, frame[3]-5)
+                Quartz.CGPathAddLineToPoint(grip, None, frame[2]-5, frame[3]-inset-5)
+            handle.setPath_(grip)
             descriptions.append(name)
             if number == 1 and self._shows_cycle(key):
                 cycle = self.cycle_for_tile[key]
@@ -1567,7 +1609,11 @@ class AtlasCanvas(AppKit.NSView):
         split = display is not None and display in offsets
         option = bool(event.modifierFlags() & AppKit.NSEventModifierFlagOption)
         if display is not None:
+            screen_frame = self._screen_view_frame(key, display, frames, scale)
+            resizing = abs(point.x-screen_frame[0]-screen_frame[2]) <= 12 and abs(point.y-screen_frame[1]-screen_frame[3]) <= 12
+            screen = next(frame for frame in core_ways._display_frames(self.tiles[key]) if frame["display"] == display)
             self.dragging = {"key": key, "display": display, "display_offset": dict(offsets.get(display, {"x": 0, "y": 0})),
+                             "resize": resizing, "size_start": screen,
                              "pointer_x": point.x, "pointer_y": point.y,
                              "scale": scale,
                              "map_x": map_x, "map_y": map_y,
@@ -1593,6 +1639,14 @@ class AtlasCanvas(AppKit.NSView):
             display = self.dragging["display"]
             dx = round((point.x - self.dragging["pointer_x"]) / scale)
             dy = round((point.y - self.dragging["pointer_y"]) / scale)
+            if self.dragging.get("resize"):
+                screen = self.dragging["size_start"]
+                resized = core_ways.resize_screen_layout(self.tiles, key, display, screen["w"]+dx, screen["h"]+dy,
+                                                         self.snap_radius_for_scale(scale))
+                self.tiles[key] = resized[key]
+                self.dragging["moved"] = self.dragging["moved"] or bool(dx or dy)
+                self._draw(False)
+                return
             tile = dict(self.tiles[key])
             offsets = dict(tile.get("display_offsets", {}))
             start = self.dragging["display_offset"]

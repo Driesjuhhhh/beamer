@@ -1436,10 +1436,14 @@ followed while it is away; with none, the page says so in one line. A linked mac
 advertise `design_sync` is shown unavailable with “Needs beta.6 or later”. Eligibility is the
 capability alone; the `app` version string is never compared.
 
-An identification request uses `settings` with only `{"identify_screens": true}`. It asks the
-directly linked desktop to show its own machine name and Crossing screen numbers for four seconds.
-It is transient: the receiver neither saves settings nor forwards this request. Older desktops
-ignore the unknown member. This request does not depend on Same on all machines being enabled.
+An identification request uses `settings` with `identify_screens: true`, a 32-character hexadecimal
+`identify_id`, `identify_hops` (0–8), and `identify_labels` mapping eligible machine ids to uppercase
+letter tags. The initiator includes only connected machines available in its Arrange view.
+A receiver only identifies itself if included; the same tag and screen number appear on the
+physical screen and map card for four seconds. Requests are transient and are deduplicated by id
+for 60 seconds. Eligible receivers may relay with one fewer hop, without changing saved settings.
+The legacy request without an id identifies locally without relaying. Older desktops ignore
+unknown members. Identification does not depend on Same on all machines being enabled.
 
 The optional `design_sync` member is independent of `on`. A capable machine sends its own current
 Design state to each directly linked capable peer after link-up and whenever its Design changes,
@@ -1495,13 +1499,16 @@ name (up to 64 characters). A map may show this machine, any desktop peer it hol
 machine only when an in-use, non-dormant, not-left-out desktop peer lists that id in `paired_with`
 and the third-party tile has a valid name. A phone, dormant, left-out or not-in-use peer cannot
 admit a third-party tile. Unnamed third-party tiles and ids outside these rules are dropped.
+A tile may carry `display_sizes`, keyed by its display ids, with integer `{w, h}` canvas sizes
+between 1 and 4096. These override individual card sizes without changing the native rectangles;
+they survive display refreshes and are removed only for displays no longer present.
 A tile may also carry `displays`, a map of 1 to 16 display
 keys to `{x, y, w, h}` logical rectangles in that machine's own display arrangement; `x` and `y`
 may be negative, and widths and heights are positive. The display rectangles are fitted into the
 machine's canvas tile while preserving their arrangement. A tile may also carry `display_offsets`, a
-map from display key to integer `{x, y}` translations in canvas units. A present offset marks that
-display as split from its group; the reported logical rectangle remains unchanged. Omitted offsets
-keep the display grouped, and dragging the machine moves the group together. A receiver ignores
+map from display key to integer `{x, y}` translations in canvas units. Each screen can be moved
+independently; the reported logical rectangle remains unchanged. Omitted offsets use the native
+arrangement as a starting position. A receiver ignores
 malformed `layout` as a whole. Peers without `displays` receive the same machine tiles without the
 nested display map or its offsets.
 Beamer 1.5.0 to 1.5.2 ignore this unknown optional member and keep their existing Crossing page.

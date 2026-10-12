@@ -28,6 +28,26 @@ def settings():
 
 
 class CrossingStateTests(unittest.TestCase):
+    def test_resized_card_round_trips_in_shared_layout_and_monitor_refresh(self):
+        from core import settings_sync
+        held = settings()
+        held['layout'][A] = tile(160, displays={'main': dict(x=0, y=0, w=160, h=100)})
+        picture = ways.resize_screen_layout(held['layout'], A, 'main', 210, 140)
+        out = self.state().drop(held, picture, A, capable={OWN, A}, snap_radius=4, **self.args())
+        self.assertTrue(out['accepted'])
+        self.assertEqual(out['settings']['layout'][A]['display_sizes']['main'], dict(w=210, h=140))
+        state = {'set_at': 100, 'by': OWN, 'tiles': out['settings']['layout']}
+        envelope = settings_sync.message_data(False, 100, by=OWN, layout_state=state)
+        read = settings_sync.read_layout_state(envelope, now=100)
+        self.assertEqual(read['tiles'][A]['display_sizes']['main'], dict(w=210, h=140))
+        invalid = copy.deepcopy(state)
+        invalid['tiles'][A]['display_sizes']['main']['w'] = -1
+        self.assertIsNone(settings_sync.read_layout_state({**envelope, 'layout': invalid}, now=100))
+        refresh = {**copy.deepcopy(out['settings']), 'machine_id': A}
+        ways.refresh_displays(refresh, {'main': return_edge.Rect(0, 0, 1920, 1080)}, now=101)
+        self.assertEqual(refresh['layout'][A]['display_sizes']['main'], dict(w=210, h=140))
+        self.assertEqual(ways.derive_layout(refresh)[A]['display_sizes']['main'], dict(w=210, h=140))
+
     def test_light_edge_snap_keeps_the_tangential_position(self):
         target = dict(x=0, y=0, w=100, h=100)
         screen = dict(x=103, y=17, w=80, h=60)

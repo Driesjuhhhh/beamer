@@ -16,7 +16,7 @@ class ScreenIdentifier:
             window.close()
         self.windows = []
 
-    def show(self, tile, name):
+    def show(self, tile, name, tag=None):
         self.clear()
         self.generation += 1
         generation = self.generation
@@ -40,9 +40,15 @@ class ScreenIdentifier:
             panel.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces |
                                          AppKit.NSWindowCollectionBehaviorFullScreenAuxiliary)
             panel.setBackgroundColor_(AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(.09, .10, .12, 1))
-            text = AppKit.NSTextField.labelWithString_(f"{name}\nScreen {number}")
-            text.setFrame_(AppKit.NSMakeRect(16, 24, 328, 112))
-            text.setFont_(AppKit.NSFont.boldSystemFontOfSize_(36))
+            title = AppKit.NSTextField.labelWithString_(name)
+            title.setFrame_(AppKit.NSMakeRect(16, 118, 328, 26))
+            title.setFont_(AppKit.NSFont.systemFontOfSize_(18))
+            title.setTextColor_(AppKit.NSColor.whiteColor())
+            title.setAlignment_(AppKit.NSTextAlignmentCenter)
+            panel.contentView().addSubview_(title)
+            text = AppKit.NSTextField.labelWithString_(f"{tag}{number}" if tag else f"Screen {number}")
+            text.setFrame_(AppKit.NSMakeRect(16, 24, 328, 85))
+            text.setFont_(AppKit.NSFont.boldSystemFontOfSize_(56))
             text.setTextColor_(AppKit.NSColor.whiteColor())
             text.setAlignment_(AppKit.NSTextAlignmentCenter)
             text.cell().setUsesSingleLineMode_(False)

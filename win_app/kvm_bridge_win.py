@@ -1654,7 +1654,7 @@ class WindowsApplication(QWidget):
         if self._config is None or any(entry.get("id") == peer and entry.get("port") == 0 for entry in self.book.peers()):
             return
         if isinstance(data, dict) and data.get("identify_screens") is True:
-            self._show_screen_numbers()
+            self._handle_identify(data, protocol.read_id(peer))
             return
         settings = app_config.load_settings(self.config_path)
         config = self._config
@@ -1906,7 +1906,7 @@ class WindowsApplication(QWidget):
         self.atlas_canvas.ledger_height = True
         module.body.addWidget(self.atlas_canvas)
         self.atlas_canvas_hint = widgets.label(
-            "Drag individual screens to arrange them · nearby edges snap lightly",
+            "Drag to move · drag a screen's lower-right corner to resize · Identify screens shows matching numbers",
             "note", wrap=True)
         module.body.addWidget(self.atlas_canvas_hint)
         if sys.platform.startswith("linux"):
@@ -1970,19 +1970,38 @@ class WindowsApplication(QWidget):
     def _crossing_machines(self) -> list:
         return [(ident, self._shown(label)) for ident, label in pages_win.crossing_machines(self._peer_entries)]
 
-    def _show_screen_numbers(self):
+    def _show_screen_numbers(self, labels=None):
         from screen_identify import ScreenIdentifier
         if not hasattr(self, "_screen_identifier"):
             self._screen_identifier = ScreenIdentifier(self)
         settings = self._crossing_settings()
         tile = ways.derive_layout(settings).get(self._config.machine_id, {})
-        self._screen_identifier.show(tile, self._config.name or platform.node())
+        self._screen_identifier.show(tile, self._config.name or platform.node(), (labels or {}).get(self._config.machine_id))
+        self.atlas_canvas.identify(labels or {self._config.machine_id: ''})
 
     def _identify_screens(self):
-        self._show_screen_numbers()
+        from core import screen_identify
+        connected = {protocol.id_text(peer) for peer in self._peer_caps()}
+        machines = screen_identify.eligible_machines(self.atlas_canvas.tiles, self._config.machine_id,
+                                                      connected, self.atlas_canvas.shelf_ids)
+        self._handle_identify(screen_identify.request(machines))
+
+    def _handle_identify(self, data, source=None):
+        from core import screen_identify
+        if not hasattr(self, "_identify_requests"):
+            self._identify_requests = screen_identify.Requests()
+        if not self._identify_requests.accept(data):
+            return
+        labels = data.get('identify_labels')
+        if labels is not None and self._config.machine_id not in labels:
+            return
+        self._show_screen_numbers(data.get("identify_labels"))
+        forwarded = screen_identify.relay(data)
+        if forwarded is None:
+            return
         for peer, caps in self._peer_caps().items():
-            if "settings" in caps:
-                self._send_to(peer, protocol.settings_msg({"identify_screens": True}))
+            if peer != source and "settings" in caps and (labels is None or protocol.id_text(peer) in labels):
+                self._send_to(peer, protocol.settings_msg(forwarded))
 
     def _chosen_machine(self) -> Optional[str]:
         ids = [entry.get("id") for entry in peerlist.desktops(self._peer_entries)]

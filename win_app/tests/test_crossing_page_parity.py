@@ -44,6 +44,28 @@ def position(widget, root):
 
 
 class CrossingPageParityTests(unittest.TestCase):
+    def test_identify_request_excluding_this_pc_does_not_show_or_forward(self):
+        from unittest.mock import patch
+        from core import screen_identify
+        request = screen_identify.request([self.peers[0]['id']])
+        with patch.object(self.window, '_show_screen_numbers') as show, patch.object(self.window, '_send_to') as send:
+            self.window._on_settings(self.peers[0]['id'], request)
+        show.assert_not_called()
+        send.assert_not_called()
+
+    def test_identify_does_not_target_a_connected_machine_left_out_of_arrange(self):
+        from unittest.mock import patch
+        peers = [bytes([i])*16 for i in (1, 2)]
+        self.window.atlas_canvas.shelf_ids.add(self.peers[1]['id'])
+        with patch.object(self.window, '_show_screen_numbers') as local, \
+                patch.object(self.window, '_peer_caps', return_value={peer: {'settings'} for peer in peers}), \
+                patch.object(self.window, '_send_to') as send:
+            self.window._identify_screens()
+        local.assert_called_once()
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args[0], peers[0])
+        self.assertNotIn(self.peers[1]['id'], send.call_args.args[1]['data']['identify_labels'])
+
     def test_identify_screens_requests_local_and_linked_identification_without_saving(self):
         from unittest.mock import patch
         from core import protocol
@@ -55,7 +77,12 @@ class CrossingPageParityTests(unittest.TestCase):
                 patch.object(self.window, '_send_to') as send:
             self.window.identify_screens_button.click()
         local.assert_called_once()
-        send.assert_called_once_with(peer, protocol.settings_msg({'identify_screens': True}))
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args[0], peer)
+        request = send.call_args.args[1]
+        self.assertEqual(request['type'], protocol.MSG_SETTINGS)
+        self.assertTrue(request['data']['identify_screens'])
+        self.assertEqual(set(request['data']['identify_labels']), {self.window._config.machine_id, self.peers[0]['id']})
         with patch.object(self.window, '_show_screen_numbers') as remote:
             self.window._on_settings(self.peers[0]['id'], {'identify_screens': True})
         remote.assert_called_once()

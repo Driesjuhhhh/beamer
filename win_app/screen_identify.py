@@ -1,4 +1,5 @@
 """Temporary, non-activating screen numbers matching the Crossing cards."""
+from html import escape
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QLabel
 from core import ways
@@ -18,7 +19,7 @@ class ScreenIdentifier:
             window.deleteLater()
         self.windows = []
 
-    def show(self, tile, name):
+    def show(self, tile, name, tag=None):
         self.clear()
         screens = QApplication.screens()
         devices = {}
@@ -40,7 +41,10 @@ class ScreenIdentifier:
                 target = screens[index] if index < len(screens) else None
             if target is None:
                 continue
-            label = QLabel(f"{name}\nScreen {number}")
+            label = QLabel(f"{name}\n{tag}{number}" if tag else f"{name}\nScreen {number}")
+            if tag:
+                label.setText(f'<div style="font-size:18px">{escape(name)}</div>'
+                              f'<div style="font-size:56px;font-weight:700">{tag}{number}</div>')
             label.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
                                  Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus |
                                  Qt.WindowType.WindowTransparentForInput)

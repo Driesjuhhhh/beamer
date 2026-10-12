@@ -301,6 +301,36 @@ class AtlasCanvasTests(unittest.TestCase):
         self.assertEqual(len(drops), 1)
         self.assertEqual(ways._display_frames(drops[0]["peer"])[0], preview)
 
+    def test_corner_drag_resizes_one_card_and_keeps_siblings_fixed(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+        from core.tests.test_screen_scene import mixed_layout
+        from core import ways
+
+        drops = []
+        canvas = AtlasCanvas(on_drop=lambda tiles, moved: drops.append(tiles))
+        self.addCleanup(canvas.deleteLater)
+        layout = mixed_layout()
+        canvas.resize(720, 300)
+        canvas.set_tiles(layout, {'A': 'PC A', 'B': 'PC B'}, {}, 'B', own_id='A')
+        canvas.show()
+        self.app.processEvents()
+        rect = canvas.display_rect('B', 'b2')
+        point = rect.bottomRight().toPoint()-QPoint(4, 4)
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(canvas, point+QPoint(45, 30), 10)
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point+QPoint(45, 30))
+        self.assertEqual(len(drops), 1)
+        self.assertEqual(canvas.tiles['B']['display_sizes']['b2'], dict(w=145, h=130))
+        self.assertEqual(canvas.tiles['A'], layout['A'])
+        self.assertEqual(ways._display_frames(canvas.tiles['B'])[0], ways._display_frames(layout['B'])[0])
+        canvas.identify({'A': 'A', 'B': 'B'})
+        self.assertTrue(canvas.identifying)
+        self.assertEqual(canvas._identify_labels['B'], 'B')
+        canvas._end_identify()
+        self.assertFalse(canvas.identifying)
+
     def test_rename_cancel_and_save_actions(self):
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest

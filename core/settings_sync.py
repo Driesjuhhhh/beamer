@@ -370,6 +370,14 @@ def read_layout_state(data, now=None):
                     return None
                 accepted_screens[key] = {name: rect[name] for name in ("x", "y", "w", "h")}
             accepted_tile["displays"] = accepted_screens
+            sizes = tile.get("display_sizes", {})
+            if (not isinstance(sizes, dict) or len(sizes) > 16 or
+                    any(key not in accepted_screens or not isinstance(size, dict) or
+                        any(type(size.get(axis)) is not int or not 1 <= size[axis] <= 4096 for axis in ("w", "h"))
+                        for key, size in sizes.items())):
+                return None
+            if sizes:
+                accepted_tile["display_sizes"] = {key: {axis: size[axis] for axis in ("w", "h")} for key, size in sizes.items()}
             offsets = tile.get("display_offsets", {})
             if (not isinstance(offsets, dict) or len(offsets) > 16
                     or any(key not in accepted_screens or not isinstance(offset, dict)
@@ -380,7 +388,7 @@ def read_layout_state(data, now=None):
                 accepted_tile["display_offsets"] = {
                     key: {"x": offset["x"], "y": offset["y"]} for key, offset in offsets.items()
                 }
-        elif tile.get("display_offsets"):
+        elif tile.get("display_offsets") or tile.get("display_sizes"):
             return None
         accepted[machine] = accepted_tile
     return {"set_at": stamp, "by": state.get("by", ""), "tiles": accepted}
@@ -410,7 +418,7 @@ def for_capabilities(data, capabilities):
         tiles = layout.get("tiles")
         if isinstance(tiles, dict):
             layout["tiles"] = {machine: {key: value for key, value in tile.items()
-                                         if key not in ("displays", "display_offsets")}
+                                         if key not in ("displays", "display_offsets", "display_sizes")}
                                if isinstance(tile, dict) else tile for machine, tile in tiles.items()}
         result["layout"] = layout
     return result

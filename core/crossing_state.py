@@ -94,7 +94,8 @@ def drop(settings, tiles, moved, *, platform, capable, live, gone, now, snap_rad
     # A screen drag changes offsets, not the machine's origin. Snap that screen
     # against individual screens without moving its siblings.
     screen_drag = (moved in active and moved in held and
-                   active[moved].get("display_offsets", {}) != held[moved].get("display_offsets", {}))
+                   (active[moved].get("display_offsets", {}) != held[moved].get("display_offsets", {}) or
+                    active[moved].get("display_sizes", {}) != held[moved].get("display_sizes", {})))
     if screen_drag and ways._valid_tile_displays(active[moved]):
         tile = active[moved]
         offsets = tile.get("display_offsets", {})

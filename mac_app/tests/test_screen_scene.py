@@ -31,3 +31,7 @@ class ScreenCanvasTests(unittest.TestCase):
         self.assertAlmostEqual(a1.origin.x+a1.size.width, b1.origin.x)
         self.assertAlmostEqual(b1.origin.x+b1.size.width, a2.origin.x)
         self.assertAlmostEqual(b1.origin.y+b1.size.height, b2.origin.y)
+        canvas.identify({'A': 'A'})
+        self.assertEqual(canvas.display_layers['A'][0].sublayers()[1].string(), 'A1')
+        self.assertEqual(canvas.display_layers['A'][1].sublayers()[1].string(), 'A2')
+        self.assertNotEqual(canvas.display_layers['B'][0].sublayers()[1].string(), 'B1')

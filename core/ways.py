@@ -168,6 +168,8 @@ def derive_layout(settings, width=160, height=100, gap=12):
                 result[peer]["displays"] = copy.deepcopy(tile["displays"])
                 if tile.get("display_offsets"):
                     result[peer]["display_offsets"] = copy.deepcopy(tile["display_offsets"])
+                if tile.get("display_sizes"):
+                    result[peer]["display_sizes"] = copy.deepcopy(tile["display_sizes"])
             if _valid_tile_name(tile):
                 result[peer]["name"] = tile["name"].strip()
     entries = [p for p in settings.get("peers", []) if p.get("id") and p.get("port", 24820) != 0]
@@ -283,13 +285,14 @@ def _display_frames(tile):
     scale_y = tile["h"] / (bottom - top)
     offset_x, offset_y = tile["x"], tile["y"]
     offsets = tile.get("display_offsets", {})
+    sizes = tile.get("display_sizes", {})
     # Round shared boundaries rather than widths independently: stored screen
     # offsets are integer units, so fractional edges could never snap exactly.
     return [{"display": key,
              "x": offset_x + round((rect["x"] - left) * scale_x) + offsets.get(key, {}).get("x", 0),
              "y": offset_y + round((rect["y"] - top) * scale_y) + offsets.get(key, {}).get("y", 0),
-             "w": max(1, round((rect["x"] + rect["w"] - left) * scale_x) - round((rect["x"] - left) * scale_x)),
-             "h": max(1, round((rect["y"] + rect["h"] - top) * scale_y) - round((rect["y"] - top) * scale_y))}
+             "w": sizes.get(key, {}).get("w", max(1, round((rect["x"] + rect["w"] - left) * scale_x) - round((rect["x"] - left) * scale_x))),
+             "h": sizes.get(key, {}).get("h", max(1, round((rect["y"] + rect["h"] - top) * scale_y) - round((rect["y"] - top) * scale_y)))}
             for key, rect in sorted(screens.items(), key=lambda item: (item[1]["y"], item[1]["x"], item[0]))]
 
 
@@ -365,6 +368,25 @@ def snap_screen_layout(layout, machine, display, radius):
     offset = offsets.get(display, {"x": 0, "y": 0})
     offsets[display] = {"x": offset["x"] + round(snapped["x"]-screen["x"]),
                         "y": offset["y"] + round(snapped["y"]-screen["y"])}
+    return result
+
+
+def resize_screen_layout(layout, machine, display, width, height, radius=0):
+    """Resize one map card without changing physical display geometry or siblings."""
+    result = copy.deepcopy(layout)
+    screen = next(frame for frame in _display_frames(result[machine]) if frame["display"] == display)
+    width, height = max(40, min(4096, round(width))), max(40, min(4096, round(height)))
+    targets = [frame for peer, tile in result.items() for frame in _display_frames(tile)
+               if peer != machine or frame["display"] != display]
+    xs = [edge-screen["x"] for target in targets for edge in (target["x"], target["x"]+target["w"])
+          if min(screen["y"]+height, target["y"]+target["h"]) >= max(screen["y"], target["y"])]
+    ys = [edge-screen["y"] for target in targets for edge in (target["y"], target["y"]+target["h"])
+          if min(screen["x"]+width, target["x"]+target["w"]) >= max(screen["x"], target["x"])]
+    width = min((value for value in xs if 40 <= value <= 4096 and abs(value-width) <= radius),
+                key=lambda value: abs(value-width), default=width)
+    height = min((value for value in ys if 40 <= value <= 4096 and abs(value-height) <= radius),
+                 key=lambda value: abs(value-height), default=height)
+    result[machine].setdefault("display_sizes", {})[display] = {"w": width, "h": height}
     return result
 
 
@@ -484,6 +506,12 @@ def _valid_tile_displays(tile):
                                             for key, rect in screens.items())):
         return False
     offsets = tile.get("display_offsets", {})
+    sizes = tile.get("display_sizes", {})
+    if not (isinstance(sizes, dict) and len(sizes) <= 16 and (not sizes or isinstance(screens, dict))
+            and all(key in screens and isinstance(size, dict)
+                    and all(type(size.get(axis)) is int and 1 <= size[axis] <= 4096 for axis in ("w", "h"))
+                    for key, size in sizes.items())):
+        return False
     return (isinstance(offsets, dict) and len(offsets) <= 16
             and (not offsets or isinstance(screens, dict))
             and all(key in screens and isinstance(offset, dict)
@@ -509,6 +537,8 @@ def refresh_displays(settings, display_map, now=None):
     offsets = tile.get("display_offsets")
     if isinstance(offsets, dict):
         tile["display_offsets"] = {key: value for key, value in offsets.items() if key in screens}
+    if isinstance(tile.get("display_sizes"), dict):
+        tile["display_sizes"] = {key: value for key, value in tile["display_sizes"].items() if key in screens}
     tile["displays"] = screens
     stamp = time.time() if now is None else now
     settings["layout_set_at"] = next_stamp(settings.get("layout_set_at", 0), stamp)

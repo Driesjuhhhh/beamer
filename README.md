@@ -98,8 +98,11 @@ Once screen information is available, both desktop apps use the same screen-only
 machine-size outlines, thirds grid or old corner overlays. For example, two screens belonging
 to PC A and two to PC B can be arranged as A–B–A with the second B below the middle screen;
 a third PC can be placed anywhere in the same map. Status refreshes preserve a screen being dragged.
-The **Identify screens** button at the top right briefly shows each screen's machine name and
-matching screen number, on this machine and directly linked machines running this version.
+Drag a screen card's lower-right grip to make it wider, taller, smaller or larger independently.
+These saved sizes belong to the shared map and do not change a monitor's resolution.
+The **Identify screens** button at the top right briefly shows matching codes such as A1, A2
+and B1 both on the physical screens and on their cards. Only machines currently connected and
+available in Arrange are included; offline, left-out and disabled machines are excluded.
 
 In your own appearance: light if your GitHub is light, dark if it is dark.
 
