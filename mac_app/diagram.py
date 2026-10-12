@@ -492,7 +492,10 @@ class AtlasCanvas(AppKit.NSView):
                 and cycle == self.cycle and bool(cycle_enabled) == self.cycle_enabled
                 and older == self.older):
             return
+        dragging_tile = self.tiles.get(self.dragging["key"]) if self.dragging is not None else None
         self.tiles = copy.deepcopy(tiles)
+        if dragging_tile is not None and self.dragging["key"] in self.tiles:
+            self.tiles[self.dragging["key"]] = dragging_tile
         self.states = copy.deepcopy(states)
         self.labels = dict(labels)
         self.own_id = own_id
@@ -694,7 +697,7 @@ class AtlasCanvas(AppKit.NSView):
         bottom = max(edge for pair in vertical for edge in pair)
         cx, cy = (left+right)/2, (top+bottom)/2
         scale = min((width-2*self.INSET) / max(1, right-left),
-                    (height-2*self.INSET) / max(1, bottom-top), 1.15)
+                    (height-2*self.INSET) / max(1, bottom-top), 1.0)
         offset_x = width / 2 - cx * scale
         offset_y = height / 2 - cy * scale
         frames = {key: (tile["x"] * scale + offset_x, tile["y"] * scale + offset_y,
@@ -708,9 +711,112 @@ class AtlasCanvas(AppKit.NSView):
             self._draw(False)
 
     @objc.python_method
+    def _screen_view_frame(self, key, display, frames=None, scale=None):
+        if frames is None:
+            frames, scale = self._map()
+        tile, group = self.tiles[key], frames[key]
+        screen = next(frame for frame in core_ways._display_frames(tile) if frame["display"] == display)
+        return (group[0] + (screen["x"]-tile["x"])*scale,
+                group[1] + (screen["y"]-tile["y"])*scale,
+                screen["w"]*scale, screen["h"]*scale)
+
+    @objc.python_method
+    def _draw_screen_scene(self, frames, scale):
+        """The same screen-only scene as Qt; no machine guides or legacy overlays."""
+        motion.transaction(False)
+        cards, seams = core_ways.screen_scene(self.tiles)
+        self._draw_guides(None)
+        for collection in (self.contact_layers, self.mark_layers, self.corner_halo_layers, self.third_layers):
+            for layer in collection.values():
+                layer.removeFromSuperlayer()
+            collection.clear()
+        for layer in (self.focus_layer, self.snap_ghost, self.snap_seam, self.recentre_layer):
+            layer.setHidden_(True)
+        self.seam_segments = []
+        self.removeAllToolTips()
+        descriptions = []
+        for key in self.tiles:
+            for layer in self._layer(key):
+                layer.setHidden_(True)
+            for layer in self.display_layers.get(key, []):
+                layer.setHidden_(True)
+        for card in cards:
+            key, display, number = card["machine"], card["display"], card["number"]
+            frame = self._screen_view_frame(key, display, frames, scale)
+            layers = self.display_layers.setdefault(key, [])
+            while len(layers) < number:
+                layer = _box("panel", "edge", 4)
+                layer.addSublayer_(_text_layer(13, "ink"))
+                layer.addSublayer_(_text_layer(11, "ink_3"))
+                self.layer().addSublayer_(layer)
+                layers.append(layer)
+            layer = layers[number-1]
+            while len(layer.sublayers() or []) < 2:
+                layer.addSublayer_(_text_layer(11, "ink_3"))
+            selected = self.selected_display == (key, display)
+            layer.setHidden_(False)
+            layer.setBorderWidth_(2 if selected else 1)
+            layer.setCornerRadius_(4)
+            layer.setZPosition_(10)
+            _set_layer_frame_if_changed(layer, _rect((frame[0]+2, frame[1]+2, max(1, frame[2]-4), max(1, frame[3]-4))))
+            theme.tint(layer, background="well" if key == self.own_id else "panel",
+                       border="ink_2" if selected else "edge")
+            title, detail = layer.sublayers()[:2]
+            name = f"{self.labels.get(key, 'Machine')} · Screen {number}"
+            title.setString_(name)
+            title.setFontSize_(13)
+            title.setFont_(theme.font(13, 650))
+            _set_layer_frame_if_changed(title, ((6, 6), (max(1, frame[2]-16), 22)))
+            status = self.states.get(key, {})
+            text = ("macOS" if key == self.own_id else
+                    f"{status.get('platform', 'Computer')} · {'Linked' if status.get('linked') else 'Offline'}")
+            if display is None:
+                text = "Waiting for screen information"
+            detail.setString_(text)
+            detail.setHidden_(frame[3] < 56)
+            _set_layer_frame_if_changed(detail, ((6, 29), (max(1, frame[2]-16), 18)))
+            descriptions.append(name)
+            if number == 1 and self._shows_cycle(key):
+                cycle = self.cycle_for_tile[key]
+                cycle.setHidden_(False)
+                cycle.setZPosition_(25)
+                _set_layer_frame_if_changed(cycle, _rect(self._cycle_box(frame)))
+                ticked = self.cycle.get(key, True) is True
+                theme.tint(cycle, background="ink_2" if ticked else "well", border="edge")
+                cycle.sublayers()[0].setHidden_(not ticked)
+        reference = next(iter(self.tiles))
+        offset_x = frames[reference][0]-self.tiles[reference]["x"]*scale
+        offset_y = frames[reference][1]-self.tiles[reference]["y"]*scale
+        for index, seam in enumerate(seams):
+            one, two = seam["one"]["machine"], seam["two"]["machine"]
+            other = two if one == self.own_id else one
+            if self.own_id in (one, two) and self.states.get(other, {}).get("edge_off"):
+                continue
+            start = (offset_x+seam["start"][0]*scale, offset_y+seam["start"][1]*scale)
+            end = (offset_x+seam["end"][0]*scale, offset_y+seam["end"][1]*scale)
+            path = Quartz.CGPathCreateMutable()
+            Quartz.CGPathMoveToPoint(path, None, *start)
+            Quartz.CGPathAddLineToPoint(path, None, *end)
+            layer = Quartz.CAShapeLayer.layer()
+            layer.setPath_(path)
+            layer.setStrokeColor_(theme.cg("signal"))
+            layer.setFillColor_(AppKit.NSColor.clearColor().CGColor())
+            layer.setLineWidth_(2)
+            layer.setOpacity_(0.65)
+            layer.setZPosition_(20)
+            self.layer().addSublayer_(layer)
+            self.contact_layers[("screen", index)] = layer
+            self.seam_segments.append({"peer": other, "kind": "seam", "start": start, "end": end, "width": 2})
+        self.setAccessibilityLabel_("; ".join(descriptions))
+        Quartz.CATransaction.commit()
+
+    @objc.python_method
     def _draw(self, animate):
         frames, _scale = self._map()
         if not frames:
+            return
+        if any(tile.get("displays") for tile in self.tiles.values()):
+            self._draw_screen_scene(frames, _scale)
             return
         motion.transaction(animate and motion.live(self))
         for key, frame in frames.items():
@@ -976,6 +1082,8 @@ class AtlasCanvas(AppKit.NSView):
 
     @objc.python_method
     def _third_segments(self, frames):
+        if any(tile.get("displays") for tile in self.tiles.values()):
+            return []
         peer, own = self.selected, self.own_id
         state = self.states.get(peer, {})
         if (peer == own or peer not in frames or own not in frames
@@ -1341,7 +1449,9 @@ class AtlasCanvas(AppKit.NSView):
     @objc.python_method
     def _cycle_hit(self, key, point):
         frames, _scale = self._map()
-        x, y, width, height = self._cycle_hit_rect(frames[key])
+        frame = (self._screen_view_frame(key, core_ways._display_frames(self.tiles[key])[0]["display"], frames, _scale)
+                 if any(tile.get("displays") for tile in self.tiles.values()) else frames[key])
+        x, y, width, height = self._cycle_hit_rect(frame)
         return self._shows_cycle(key) and x <= point.x <= x + width and y <= point.y <= y + height
 
     @objc.python_method

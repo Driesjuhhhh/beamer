@@ -296,6 +296,30 @@ def _display_frames(tile):
 SCREEN_SNAP_PX = 4
 
 
+def screen_scene(layout):
+    """The screen cards and seams both desktop canvases draw, without group bounds."""
+    cards = [{"machine": machine, "display": frame["display"], "number": number, "frame": frame}
+             for machine, tile in layout.items()
+             for number, frame in enumerate(_display_frames(tile), 1)]
+    seams = []
+    for index, one in enumerate(cards):
+        for two in cards[index + 1:]:
+            if one["machine"] == two["machine"]:
+                continue
+            contact = _rect_contact(one["frame"], two["frame"])
+            if contact and contact[0] in EDGES:
+                side, start, end = contact
+                frame = one["frame"]
+                if side in ("left", "right"):
+                    fixed = frame["x"] + (frame["w"] if side == "right" else 0)
+                    ends = ((fixed, start), (fixed, end))
+                else:
+                    fixed = frame["y"] + (frame["h"] if side == "bottom" else 0)
+                    ends = ((start, fixed), (end, fixed))
+                seams.append({"one": one, "two": two, "start": ends[0], "end": ends[1]})
+    return cards, seams
+
+
 def snap_screen_position(screen, targets, radius):
     """A small edge magnet, preserving the position along the touching edge.
 

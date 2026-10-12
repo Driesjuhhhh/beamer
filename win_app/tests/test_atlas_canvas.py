@@ -254,6 +254,27 @@ class AtlasCanvasTests(unittest.TestCase):
         self.assertEqual(ways._display_frames(canvas.tiles["home"])[0], before)
         self.assertEqual(canvas.tiles["home"]["display_offsets"]["right"], dict(x=0, y=10))
 
+    def test_refresh_during_drag_preserves_the_screen_under_the_pointer(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+        from core.tests.test_screen_scene import mixed_layout
+
+        canvas = AtlasCanvas()
+        self.addCleanup(canvas.deleteLater)
+        original = mixed_layout()
+        canvas.resize(720, 300)
+        canvas.set_tiles(original, {"A": "PC A", "B": "PC B"}, {}, "B", own_id="A")
+        canvas.show()
+        self.app.processEvents()
+        point = canvas.display_rect("B", "b2").center().toPoint()
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(canvas, point + QPoint(40, 0), 10)
+        moved = dict(canvas.tiles["B"]["display_offsets"]["b2"])
+        canvas.set_tiles(original, {"A": "PC A", "B": "PC B"}, {}, "B", own_id="A")
+        self.assertEqual(canvas.tiles["B"]["display_offsets"]["b2"], moved)
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point + QPoint(40, 0))
+
     def test_rename_cancel_and_save_actions(self):
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest

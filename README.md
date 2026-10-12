@@ -92,7 +92,11 @@ screens stay in place. You can leave a gap between this machine's screens and pu
 machine's screen between them. Screens have a light, four-pixel edge snap that keeps their
 position along the edge, without jumping to a centre or a third. Crossing follows
 their touching borders. These positions configure Beamer; they do not change Windows' display settings.
-Machines that do not report their displays keep a single machine tile.
+Machines that have not reported their displays show a single placeholder until screen information arrives.
+Once screen information is available, both desktop apps use the same screen-only map: no
+machine-size outlines, thirds grid or old corner overlays. For example, two screens belonging
+to PC A and two to PC B can be arranged as A–B–A with the second B below the middle screen;
+a third PC can be placed anywhere in the same map. Status refreshes preserve a screen being dragged.
 
 In your own appearance: light if your GitHub is light, dark if it is dark.
 

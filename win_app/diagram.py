@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, QSize, QSizeF, Qt, QTimer
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QAccessible, QAccessibleAnnouncementEvent
 from PySide6.QtWidgets import QLineEdit, QPushButton, QSlider, QSizePolicy, QToolTip, QWidget
 
@@ -403,7 +403,10 @@ class AtlasCanvas(QWidget):
 
     def set_tiles(self, tiles, labels, states, selected, cycle_mode="last", cycle=None, capable=(), own_id=None,
                   rename_values=None):
+        dragging = self.tiles.get(self._drag) if self._drag is not None else None
         self.tiles = {key: dict(tile) for key, tile in tiles.items()}
+        if dragging is not None and self._drag in self.tiles:
+            self.tiles[self._drag] = dragging
         self.labels = dict(labels)
         self.rename_values = dict(rename_values if rename_values is not None else labels)
         self.states = {key: dict(state) for key, state in states.items()}
@@ -651,6 +654,8 @@ class AtlasCanvas(QWidget):
         return ways.side_contacts(self.tiles[self._own_id()], self.tiles[peer])
 
     def _third_segment_at(self, point):
+        if any(tile.get("displays") for tile in self.tiles.values()):
+            return None
         own_id, peer = self._own_id(), self.selected
         if (own_id not in self.tiles or peer not in self.tiles or peer == own_id
                 or peer in self.shelf_ids):
@@ -749,6 +754,10 @@ class AtlasCanvas(QWidget):
         painter.setPen(QPen(_colour("edge"), 1.0))
         painter.setBrush(_colour("ground"))
         painter.drawRoundedRect(QRectF(0.5, 0.5, self.width()-1, self.height()-1), 4, 4)
+        if any(tile.get("displays") for tile in self.tiles.values()):
+            self._paint_screen_scene(painter)
+            painter.end()
+            return
         own_id = self._own_id()
         if own_id in self.tiles:
             own_rect = self.tile_rect(own_id)
@@ -955,6 +964,56 @@ class AtlasCanvas(QWidget):
                 painter.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), 3, 3)
         painter.end()
 
+    def cycle_rect(self, peer):
+        if self.tiles[peer].get("displays"):
+            return self.display_rect(peer, ways._display_frames(self.tiles[peer])[0]["display"])
+        return self.tile_rect(peer)
+
+    def _paint_screen_scene(self, painter):
+        active = {peer: tile for peer, tile in self.tiles.items() if peer not in self.shelf_ids}
+        cards, seams = ways.screen_scene(active)
+        left, top, _width, _height = self._bounds
+        def point(position):
+            return QPointF((position[0]-left)*self._scale+self._origin.x(),
+                           (position[1]-top)*self._scale+self._origin.y())
+        for card in cards:
+            peer, display, frame = card["machine"], card["display"], card["frame"]
+            rect = QRectF(point((frame["x"], frame["y"])), QSizeF(frame["w"]*self._scale, frame["h"]*self._scale))
+            selected = self.selected_display == (peer, display)
+            painter.setBrush(_colour("well" if peer == self._own_id() else "panel"))
+            painter.setPen(QPen(_colour("ink_2" if selected else "edge"), 2 if selected else 1))
+            painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 4, 4)
+            title = f"{self.labels.get(peer, 'Machine')} · Screen {card['number']}"
+            painter.setFont(theme.font(tokens.TYPE["body"], 650))
+            painter.setPen(_colour("ink"))
+            painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+                             painter.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, max(1, round(rect.width()-16))))
+            painter.setFont(theme.font(tokens.TYPE["note"]))
+            painter.setPen(_colour("ink_3"))
+            status = self.states.get(peer, {}).get("detail", "")
+            if display is None:
+                status = "Waiting for screen information"
+            if rect.height() >= 56:
+                painter.drawText(rect.adjusted(8, 31, -8, -8), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+                                 painter.fontMetrics().elidedText(status, Qt.TextElideMode.ElideRight, max(1, round(rect.width()-16))))
+            if card["number"] == 1 and self._shows_cycle(peer):
+                box = self._cycle_box(rect)
+                ticked = bool(self.cycle.get(peer, True))
+                painter.setPen(QPen(_colour("edge"), 1))
+                painter.setBrush(_colour("ink_2" if ticked else "well"))
+                painter.drawRoundedRect(box, 3, 3)
+                if ticked:
+                    painter.setPen(_colour("ground"))
+                    painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "✓")
+        self.corner_marks = []
+        for seam in seams:
+            one, two = seam["one"]["machine"], seam["two"]["machine"]
+            other = two if one == self._own_id() else one
+            if self._own_id() in (one, two) and self.states.get(other, {}).get("edge_off"):
+                continue
+            painter.setPen(QPen(_colour("signal", .65), 2))
+            painter.drawLine(point(seam["start"]), point(seam["end"]))
+
     def _own_id(self):
         return self.own_id or next((peer for peer, label in self.labels.items() if label == "This PC"), None)
 
@@ -967,7 +1026,7 @@ class AtlasCanvas(QWidget):
             return
         display_peer, display = self.display_at(point)
         if display_peer is not None:
-            if self._shows_cycle(display_peer) and self._cycle_hit_rect(self.tile_rect(display_peer)).contains(point):
+            if self._shows_cycle(display_peer) and self._cycle_hit_rect(self.cycle_rect(display_peer)).contains(point):
                 self.set_cycle(display_peer, not self.cycle.get(display_peer, True))
                 event.accept()
                 return
@@ -999,7 +1058,7 @@ class AtlasCanvas(QWidget):
                 if peer == self._own_id():
                     event.accept()
                     return
-                if self._shows_cycle(peer) and self._cycle_hit_rect(rect).contains(point):
+                if self._shows_cycle(peer) and self._cycle_hit_rect(self.cycle_rect(peer)).contains(point):
                     self.set_cycle(peer, not self.cycle.get(peer, True))
                     event.accept()
                     return
@@ -1058,7 +1117,7 @@ class AtlasCanvas(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor if hovered and
                            (hovered != self._own_id() or self.tiles[hovered].get("displays"))
                            else Qt.CursorShape.ArrowCursor)
-        if hovered and self._shows_cycle(hovered) and self._cycle_hit_rect(self.tile_rect(hovered)).contains(event.position()):
+        if hovered and self._shows_cycle(hovered) and self._cycle_hit_rect(self.cycle_rect(hovered)).contains(event.position()):
             QToolTip.showText(self.mapToGlobal(event.position().toPoint()), "In the shortcut's cycle", self)
         super().mouseMoveEvent(event)
 
