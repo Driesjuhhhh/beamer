@@ -28,6 +28,33 @@ def settings():
 
 
 class CrossingStateTests(unittest.TestCase):
+    def test_tall_source_routes_upper_and_lower_halves_to_distinct_screens(self):
+        from core import receiver
+        held = settings()
+        held['layout'] = {
+            OWN: tile(w=200, h=200, displays={'0':dict(x=0,y=0,w=100,h=200),
+                                           '1':dict(x=100,y=0,w=100,h=100)}),
+            A: tile(100,w=200,h=100,displays={'0':dict(x=0,y=0,w=100,h=100),
+                                          '1':dict(x=100,y=0,w=100,h=100)})}
+        held['layout'][OWN]['display_offsets'] = {'1':dict(x=100,y=0)}
+        held['layout'][OWN]['display_sizes'] = {'0':dict(w=100,h=200),'1':dict(w=100,h=100)}
+        held['layout'][A]['display_offsets'] = {'1':dict(x=-100,y=100)}
+        result = ways.compile_layout(held, held['layout'], capable={OWN,A})
+        zones = result['settings']['zones']
+        models = receiver.zone_models(zones, result['settings']['peers'], {protocol.read_id(A)}, 1)
+        physical = {'0':return_edge.Rect(0,0,100,200), '1':return_edge.Rect(100,0,100,100)}
+        for y, expected, offset in [(50,'0',.5),(110,'1',.1),(150,'1',.5),(190,'1',.9)]:
+            chosen = None
+            for peer, model in receiver.zone_models(zones, result['settings']['peers'], {protocol.read_id(A)}, 1):
+                outcome = model.feed(list(physical.values()), (99,y), 2, 0, display_map=physical)
+                if outcome.action == return_edge.CROSS:
+                    chosen = outcome
+                    break
+            self.assertIsNotNone(chosen)
+            self.assertEqual(chosen.display, expected)
+            self.assertAlmostEqual(chosen.offset, offset)
+        self.assertFalse(any(zone['kind'] == 'corner' for zone in zones))
+
     def test_resized_card_round_trips_in_shared_layout_and_monitor_refresh(self):
         from core import settings_sync
         held = settings()

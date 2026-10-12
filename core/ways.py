@@ -293,7 +293,7 @@ def _display_frames(tile):
              "y": offset_y + round((rect["y"] - top) * scale_y) + offsets.get(key, {}).get("y", 0),
              "w": sizes.get(key, {}).get("w", max(1, round((rect["x"] + rect["w"] - left) * scale_x) - round((rect["x"] - left) * scale_x))),
              "h": sizes.get(key, {}).get("h", max(1, round((rect["y"] + rect["h"] - top) * scale_y) - round((rect["y"] - top) * scale_y)))}
-            for key, rect in sorted(screens.items(), key=lambda item: (item[1]["y"], item[1]["x"], item[0]))]
+            for key, rect in sorted(screens.items(), key=lambda item: (0, int(item[0])) if item[0].isdigit() else (1, item[0]))]
 
 
 SCREEN_SNAP_PX = 4
@@ -659,6 +659,7 @@ def compile_layout(settings, layout, moved=None, capable=(), now=None, platform=
     else:
         saved["layout"] = copy.deepcopy(layout)
     allocations = {}
+    precise = any(tile.get('display_sizes') for tile in active.values())
     for peer, found in contacts.items():
         entry = peers[peer]
         if peer not in picture_peers or not _zoned(entry) or not entry["ways"]["edge"]:
@@ -708,7 +709,7 @@ def compile_layout(settings, layout, moved=None, capable=(), now=None, platform=
                 if side == "corner":
                     corner = contact[1]
                     key = (screen["display"], corner)
-                    if (intent["edge"] or intent["corner"]) and key not in corners:
+                    if (intent["corner"] or intent["edge"] and not precise) and key not in corners:
                         corners.add(key)
                         edge = corner.split("_")[1]
                         add_zone(peer, "corner", screen, edge, target, corner=corner, edge=edge)
@@ -717,7 +718,16 @@ def compile_layout(settings, layout, moved=None, capable=(), now=None, platform=
                 assigned = [part for part in PARTS if allocations.get((screen["display"], side, part), (None, None, None))[1:] == (peer, index)]
                 touched.update(assigned)
                 kept = [part for part in assigned if part in intent["thirds"]]
-                if intent["edge"] and kept:
+                if precise and screen['display'] is not None and target['display'] is not None and intent['edge']:
+                    start, end = contact[1:]
+                    axis, size = ('y', 'h') if side in ('left', 'right') else ('x', 'w')
+                    segment = [(start-screen[axis])/screen[size], (end-screen[axis])/screen[size]]
+                    destination = [(start-target[axis])/target[size], (end-target[axis])/target[size]]
+                    kind = 'edge' if len(intent['thirds']) == 3 else 'part'
+                    add_zone(peer, kind, screen, side, target, segment=segment, target_segment=destination,
+                             **({'parts': list(intent['thirds'])} if kind == 'part' else {}))
+                    states.append(kind)
+                elif intent["edge"] and kept:
                     kind = "edge" if len(kept) == 3 else "part"
                     add_zone(peer, kind, screen, side, target, **({"parts": kept} if kind == "part" else {}))
                     states.append(kind)

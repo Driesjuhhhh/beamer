@@ -37,7 +37,19 @@ def paint(canvas):
 class CrossingLedgerTests(unittest.TestCase):
     setUp = parity.CrossingPageParityTests.setUp
     tearDown = parity.CrossingPageParityTests.tearDown
-    _open_window = parity.CrossingPageParityTests._open_window
+    def _open_window(self):
+        parity.CrossingPageParityTests._open_window(self)
+        # These tests cover the legacy machine canvas's thirds/corner controls.
+        # Independent screen-card controls are covered by test_atlas_canvas.
+        self.window._refresh_own_displays = lambda: None
+        self.window._own_display_map = {}
+        held = app_config.load_settings(self.path)
+        for tile in held['layout'].values():
+            for key in ('displays','display_offsets','display_sizes'):
+                tile.pop(key,None)
+        app_config.write_settings(self.path,held)
+        self.window._read_crossing()
+        self.window._reflect_ways()
     _close_window = parity.CrossingPageParityTests._close_window
     _stop_patches = parity.CrossingPageParityTests._stop_patches
 

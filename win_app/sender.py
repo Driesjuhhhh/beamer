@@ -757,10 +757,14 @@ class LinkSender:
         if not models:
             return None
         monitors = self._cached_monitors()
-        display_map = {str(index): monitor for index, monitor in enumerate(monitors)}
+        display_map = self._cached_display_map()
         from capture_win import internal_seam_position
 
-        return internal_seam_position((x, y), monitors, display_map, models)
+        try:
+            previous = self._desktop_module().cursor_position()
+        except Exception:
+            return None
+        return internal_seam_position((x, y), monitors, display_map, models, previous=previous)
 
     def pressure_at(self, now: float | None = None) -> float:
         """The active local way's pressure fraction at `now`, without advancing its model."""

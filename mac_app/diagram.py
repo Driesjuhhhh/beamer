@@ -787,6 +787,8 @@ class AtlasCanvas(AppKit.NSView):
             status = self.states.get(key, {})
             text = ("macOS" if key == self.own_id else
                     f"{status.get('platform', 'Computer')} · {'Linked' if status.get('linked') else 'Offline'}")
+            if key != self.own_id and status.get('edge_off'):
+                text = 'Crossing off · enable Edge below'
             if display is None:
                 text = "Waiting for screen information"
             detail.setString_(text)

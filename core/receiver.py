@@ -204,11 +204,12 @@ def zone_models(zones, peers, allowed, resistance_px: int, notch_span=None) -> l
         try:
             if kind == "edge" and side in crossing.EDGES:
                 model = crossing.ReturnEdge(side, resistance_px, display=display,
-                                            target_display=target_display, target_side=target_side)
+                                            target_display=target_display, target_side=target_side,
+                                            segment=zone.get('segment'), target_segment=zone.get('target_segment'))
             elif kind == "part" and side in crossing.EDGES and isinstance(zone.get("parts"), list):
                 model = crossing.PartEdge(side, [part for part in zone["parts"] if isinstance(part, str)],
                                           resistance_px, display=display, target_display=target_display,
-                                          target_side=target_side)
+                                          target_side=target_side, segment=zone.get('segment'), target_segment=zone.get('target_segment'))
             elif kind == "corner" and isinstance(zone.get("corner"), str) and zone.get("edge") in zone["corner"].split("_"):
                 model = crossing.CornerPush(zone["corner"], zone["edge"], resistance_px, display=display,
                                             target_display=target_display, target_side=target_side)

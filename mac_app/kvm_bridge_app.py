@@ -3195,7 +3195,7 @@ class ControlWindow(AppKit.NSObject):
         if not hasattr(self, "_screen_identifier"):
             self._screen_identifier = ScreenIdentifier()
         settings = self.settings_store.current()
-        tile = core_ways.derive_layout(settings).get(settings["machine_id"], {})
+        tile = self.atlas_canvas.tiles.get(settings["machine_id"]) or core_ways.derive_layout(settings).get(settings["machine_id"], {})
         self._screen_identifier.show(tile, settings.get("name") or socket.gethostname().split(".")[0],
                                      (labels or {}).get(settings["machine_id"]))
         self.atlas_canvas.identify(labels or {settings['machine_id']: ''})

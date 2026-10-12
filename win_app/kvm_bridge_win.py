@@ -1975,7 +1975,7 @@ class WindowsApplication(QWidget):
         if not hasattr(self, "_screen_identifier"):
             self._screen_identifier = ScreenIdentifier(self)
         settings = self._crossing_settings()
-        tile = ways.derive_layout(settings).get(self._config.machine_id, {})
+        tile = self.atlas_canvas.tiles.get(self._config.machine_id) or ways.derive_layout(settings).get(self._config.machine_id, {})
         self._screen_identifier.show(tile, self._config.name or platform.node(), (labels or {}).get(self._config.machine_id))
         self.atlas_canvas.identify(labels or {self._config.machine_id: ''})
 

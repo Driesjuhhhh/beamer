@@ -264,7 +264,8 @@ class Row(AppKit.NSView):
         self.settings, self.entry, self.selected = settings, entry, selected
         self.held = ways.ways(settings, self.peer)
         tiles, own = ways.derive_layout(settings, gap=0), settings.get("machine_id")
-        contact = ways._rect_contact(tiles[own], tiles[self.peer]) if own in tiles and self.peer in tiles else None
+        contacts = ways.side_contacts(tiles[own], tiles[self.peer]) if own in tiles and self.peer in tiles else []
+        contact = contacts[0][1] if contacts else None
         self.side = contact[0] if contact and contact[0] != "corner" else ""
         name = self.control._shown(peerlist.label_for(settings["peers"], peer_id=self.peer) or peerlist.UNNAMED)
         linked = self.control._live(self.peer)

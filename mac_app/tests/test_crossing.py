@@ -32,6 +32,19 @@ def push_right(machine, times, dx=20, y=500.0, dragging=False):
 
 
 class TickStepsTests(unittest.TestCase):
+    def test_stacked_destinations_keep_separate_display_segments(self):
+        zones = [dict(peer='pc', kind='edge', display='0', side='right',
+                      target_display=str(index), target_side='left', segment=span, target_segment=[0,1])
+                 for index, span in enumerate(([0,.5], [.5,1]))]
+        for y, expected, offset in ((50,'0',.5),(110,'1',.1),(150,'1',.5)):
+            machine = CrossingEngine.from_zones(dict(resistance_px=1,block_while_dragging=False), zones,
+                                                [dict(id='pc',side='right')])
+            self.assertEqual(len(machine.ways), 2)
+            step = machine.feed(99,y,2,0,(0,0,100,200),1, displays=[(0,0,100,200)])
+            self.assertTrue(step.crossed)
+            self.assertEqual(step.display, expected)
+            self.assertAlmostEqual(step.offset, offset, delta=.01)
+
     def test_which_quarter_ticks_are_felt(self):
         from crossing import tick_fires
 

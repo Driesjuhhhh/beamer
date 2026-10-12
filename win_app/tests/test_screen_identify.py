@@ -20,6 +20,21 @@ class FakeScreen:
 
 
 class IdentifyTests(unittest.TestCase):
+    def test_labels_use_native_rectangles_even_when_qt_screen_order_differs(self):
+        app = QApplication.instance() or QApplication([])
+        identifier = ScreenIdentifier()
+        self.addCleanup(identifier.clear)
+        tile = dict(x=0,y=0,w=200,h=100,displays={
+            '0':dict(x=1080,y=789,w=1920,h=1080),
+            '1':dict(x=0,y=0,w=1080,h=2560)})
+        with patch('screen_identify.QApplication.screens', return_value=[FakeScreen(),FakeScreen()]), \
+                patch('screen_identify.QApplication.platformName', return_value='windows'), \
+                patch('win32gui.GetWindowRect', return_value=(0,0,360,160)), \
+                patch('win32gui.SetWindowPos') as position:
+            identifier.show(tile,'Studio','A')
+        self.assertEqual([(call.args[2],call.args[3]) for call in position.call_args_list],
+                         [(1860,1249),(360,1200)])
+
     def test_repeated_identification_replaces_labels_and_keeps_screen_numbering(self):
         app = QApplication.instance() or QApplication([])
         identifier = ScreenIdentifier()

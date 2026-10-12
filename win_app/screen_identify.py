@@ -57,5 +57,14 @@ class ScreenIdentifier:
             center = target.geometry().center()
             label.move(center.x()-180, center.y()-80)
             label.show()
+            if native and QApplication.platformName() == 'windows':
+                import win32gui
+                handle = int(label.winId())
+                rect = win32gui.GetWindowRect(handle)
+                width, height = rect[2]-rect[0], rect[3]-rect[1]
+                win32gui.SetWindowPos(handle, -1,
+                                     native['x']+(native['w']-width)//2,
+                                     native['y']+(native['h']-height)//2,
+                                     0, 0, 0x0001 | 0x0010)
             self.windows.append(label)
         self.timer.start(4000)

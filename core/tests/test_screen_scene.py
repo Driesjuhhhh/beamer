@@ -17,6 +17,16 @@ def mixed_layout():
 
 
 class ScreenSceneTests(unittest.TestCase):
+    def test_screen_numbers_follow_ids_instead_of_position_or_orientation(self):
+        tile = dict(x=0, y=0, w=200, h=100, displays={
+            '0': dict(x=1080, y=789, w=1920, h=1080),
+            '1': dict(x=0, y=0, w=1080, h=2560)})
+        cards, _seams = ways.screen_scene({'own': tile})
+        self.assertEqual([(c['display'], c['number']) for c in cards], [('0', 1), ('1', 2)])
+        tile['displays']['0']['y'] = -500
+        cards, _seams = ways.screen_scene({'own': tile})
+        self.assertEqual([(c['display'], c['number']) for c in cards], [('0', 1), ('1', 2)])
+
     def test_resizing_keeps_other_screens_and_native_geometry_unchanged(self):
         layout = mixed_layout()
         before = copy.deepcopy(layout)

@@ -1502,6 +1502,10 @@ admit a third-party tile. Unnamed third-party tiles and ids outside these rules 
 A tile may carry `display_sizes`, keyed by its display ids, with integer `{w, h}` canvas sizes
 between 1 and 4096. These override individual card sizes without changing the native rectangles;
 they survive display refreshes and are removed only for displays no longer present.
+For resized screen layouts, compiled edge/part zones may carry `segment` and `target_segment`,
+each a normalized `[start, end]` interval on the source and destination display edge. The source
+interval chooses the exact touching screen; arrival offset is mapped into the destination interval.
+This avoids assigning a split edge to one target for an entire third when multiple screens touch it.
 A tile may also carry `displays`, a map of 1 to 16 display
 keys to `{x, y, w, h}` logical rectangles in that machine's own display arrangement; `x` and `y`
 may be negative, and widths and heights are positive. The display rectangles are fitted into the

@@ -44,6 +44,30 @@ def position(widget, root):
 
 
 class CrossingPageParityTests(unittest.TestCase):
+    def test_ledger_uses_individual_screen_contacts_not_group_rectangles(self):
+        from core import ways
+        from core.tests.test_screen_scene import mixed_layout
+        import copy
+        held = app_config.load_settings(self.path)
+        own, peer = held['machine_id'], self.peers[0]['id']
+        example = mixed_layout()
+        held['layout'] = {own: example['A'], peer: example['B']}
+        held['layout'][self.peers[1]['id']] = dict(x=-500, y=0, w=160, h=100)
+        held['layout'][own]['x'] += 500
+        # Keep screen positions while deliberately separating the group anchors.
+        held['layout'][own]['display_offsets'] = {'a1': dict(x=-500,y=0), 'a2': dict(x=-400,y=0)}
+        self.assertIsNone(ways._rect_contact(held['layout'][own], held['layout'][peer]))
+        result = ways.compile_layout(held, held['layout'])
+        held = result['settings']
+        app_config.write_settings(self.path, held)
+        self.window._read_crossing()
+        self.window._reflect_ways()
+        row = self.window.crossing_ledger.rows[peer]
+        self.assertTrue(row.edge_text.isEnabled())
+        row.edge_text.click()
+        row.edge_text.click()
+        self.assertTrue(row.edge_text.isEnabled())
+
     def test_identify_request_excluding_this_pc_does_not_show_or_forward(self):
         from unittest.mock import patch
         from core import screen_identify

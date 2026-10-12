@@ -60,6 +60,12 @@ class GeometryTests(unittest.TestCase):
 
 
 class PressureTests(unittest.TestCase):
+    def test_a_zone_on_another_display_cannot_trigger_from_the_neighbor(self):
+        left, right = Rect(0, 0, 100, 100), Rect(100, 0, 100, 100)
+        edge = ReturnEdge('right', resistance_px=1, display='left')
+        outcome = edge.feed([left, right], (150, 50), 20, 0, display_map={'left': left, 'right': right})
+        self.assertEqual(outcome.action, PASS)
+
     def setUp(self):
         self.clock = FakeClock()
         self.edge = ReturnEdge("left", resistance_px=120, clock=self.clock)

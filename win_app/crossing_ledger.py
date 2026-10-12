@@ -494,7 +494,8 @@ class CrossingLedger(QWidget):
                 self.column.insertWidget(index + 1, row)
             own = layout.get(settings.get("machine_id"))
             tile = layout.get(peer)
-            contact = ways._rect_contact(own, tile) if own and tile else None
+            contacts = ways.side_contacts(own, tile) if own and tile else []
+            contact = contacts[0][1] if contacts else None
             side = contact[0] if contact and contact[0] != "corner" else ""
             row.reflect(settings, entries[peer], labels.get(peer, "Other machine"), side, live(peer), chosen == peer, trigger, labels, (legacy or {}).get(peer, ""))
         self.setVisible(bool(entries))

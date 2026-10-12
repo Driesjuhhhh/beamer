@@ -21,6 +21,16 @@ class MouseData(ctypes.Structure):
 
 
 class InternalSeamTests(unittest.TestCase):
+    def test_only_the_display_the_pointer_is_leaving_can_claim_the_seam(self):
+        both = {'left': self.left, 'right': self.right}
+        edges = [ReturnEdge('right', display='left'), ReturnEdge('left', display='right')]
+        self.assertEqual(capture_win.internal_seam_position((105, 50), self.monitors, both, edges,
+                                                           previous=(99, 50)), (99, 50))
+        self.assertIsNone(capture_win.internal_seam_position((105, 50), self.monitors, both, edges,
+                                                           previous=(110, 50)))
+        self.assertEqual(capture_win.internal_seam_position((95, 50), self.monitors, both, edges,
+                                                           previous=(100, 50)), (100, 50))
+
     def setUp(self):
         self.left = Rect(0, 0, 100, 100)
         self.right = Rect(100, 0, 100, 100)

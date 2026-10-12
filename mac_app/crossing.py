@@ -118,6 +118,8 @@ class Ways:
     display: str = None
     target_display: str = None
     target_side: str = None
+    segment: tuple = None
+    target_segment: tuple = None
 
 
 class CrossingEngine:
@@ -179,10 +181,16 @@ class CrossingEngine:
                 continue
             display = zone.get("display")
             edge = zone.get("side", sides[peer])
-            key = (peer, display, edge)
+            try:
+                segment = return_edge.ReturnEdge._segment(zone.get('segment'))
+                destination = return_edge.ReturnEdge._segment(zone.get('target_segment'))
+            except ValueError:
+                continue
+            key = (peer, display, edge, zone.get('target_display') if segment else None, segment)
             held = found.setdefault(key, {"methods": set(), "parts": ("middle",), "corner": "top_right",
                                           "target_display": zone.get("target_display"),
-                                          "target_side": zone.get("target_side")})
+                                          "target_side": zone.get("target_side"),
+                                          'segment': segment, 'target_segment': destination})
             kind = zone.get("kind")
             if kind in ("edge", "part") and edge not in EDGES:
                 continue
@@ -197,8 +205,8 @@ class CrossingEngine:
             held["methods"].add(kind)
         ways = [Ways(peer, frozenset(held["methods"]), edge if edge in EDGES else "right",
                      frozenset(held["parts"]), held["corner"], display, held["target_display"],
-                     held["target_side"])
-                for (peer, display, edge), held in found.items() if held["methods"]]
+                     held["target_side"], held['segment'], held['target_segment'])
+                for (peer, display, edge, _destination, _segment), held in found.items() if held["methods"]]
         return cls(resistance_px=crossing["resistance_px"], block_while_dragging=crossing["block_while_dragging"],
                    ways=ways)
 
@@ -306,7 +314,7 @@ class CrossingEngine:
                 crossed=True,
                 pin=self.pin,
                 edge=OPPOSITE[mac_edge],
-                offset=self._offset(mac_edge, self.pin, bounds),
+                offset=self._mapped_offset(mac_edge, self.pin, bounds),
                 mac_edge=mac_edge,
                 region=region,
                 via=via,
@@ -405,6 +413,11 @@ class CrossingEngine:
         `ready(peer)`, when given, leaves out the zones of machines that cannot take input now."""
         ways = [way for way in self.ways if ready is None or ready(way.peer)]
         display_frames = {str(index): frame for index, frame in enumerate(displays or ())}
+        def inside(way, screen):
+            if way.segment is None or screen is None:
+                return True
+            fraction = self._offset(way.edge, (x, y), screen)
+            return way.segment[0] <= fraction and (fraction < way.segment[1] or way.segment[1] == 1 and fraction <= 1)
         left, top, right, bottom = bounds
         x_max, y_max = right - 1, bottom - 1
         at = {
@@ -446,7 +459,7 @@ class CrossingEngine:
                     "top": y <= sy + EDGE_TOLERANCE,
                     "bottom": y >= sb - 1 - EDGE_TOLERANCE,
                 }[way.edge])
-            if "edge" in way.methods and edge_at:
+            if "edge" in way.methods and edge_at and inside(way, screen):
                 self._push_box = screen or edge_box[way.edge]
                 self._selected_way = way
                 return way.edge, self._strip(way.edge, self._push_box), None, "edge", way.peer
@@ -461,7 +474,7 @@ class CrossingEngine:
                     "top": y <= sy + EDGE_TOLERANCE,
                     "bottom": y >= sb - 1 - EDGE_TOLERANCE,
                 }[way.edge])
-            if "part" in way.methods and edge_at:
+            if "part" in way.methods and edge_at and inside(way, screen):
                 # The thirds are the pointer's own display's, as the PC measures them: along the whole
                 # desktop, a short display beside a tall one could hold none of the middle third.
                 local_bounds = screen or own or bounds
@@ -552,3 +565,11 @@ class CrossingEngine:
             span = right - 1 - left
             fraction = (x - left) / span if span > 0 else 0.0
         return round(max(0.0, min(1.0, fraction)), 4)
+
+    def _mapped_offset(self, edge, point, bounds):
+        way = self._selected_way
+        if way is None or way.segment is None or way.target_segment is None:
+            return self._offset(edge, point, bounds)
+        offset = self._offset(edge, point, self._push_box or bounds)
+        fraction = max(0, min(1, (offset-way.segment[0])/(way.segment[1]-way.segment[0])))
+        return way.target_segment[0]+fraction*(way.target_segment[1]-way.target_segment[0])

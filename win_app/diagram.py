@@ -1009,6 +1009,8 @@ class AtlasCanvas(QWidget):
             painter.setFont(theme.font(tokens.TYPE["note"]))
             painter.setPen(_colour("ink_3"))
             status = self.states.get(peer, {}).get("detail", "")
+            if peer != self._own_id() and self.states.get(peer, {}).get("edge_off"):
+                status = "Crossing off · enable Edge below"
             if display is None:
                 status = "Waiting for screen information"
             if identifying:

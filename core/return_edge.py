@@ -207,13 +207,16 @@ class ReturnEdge:
 
     def __init__(self, edge: str, resistance_px: int = DEFAULT_RESISTANCE_PX,
                  clock: Callable[[], float] = time.monotonic, display: str = None,
-                 target_display: str = None, target_side: str = None) -> None:
+                 target_display: str = None, target_side: str = None,
+                 segment=None, target_segment=None) -> None:
         if edge not in EDGES:
             raise ValueError(f"unknown edge {edge!r}")
         self.edge = edge
         self.display = display
         self.target_display = target_display
         self.target_side = target_side
+        self.segment = self._segment(segment)
+        self.target_segment = self._segment(target_segment)
         self.resistance_px = max(0, int(resistance_px))
         self._clock = clock
         self._travel = 0.0
@@ -221,6 +224,21 @@ class ReturnEdge:
         self._arrival_at = None
         self._arrival_inward = 0.0
         self.armed = True
+
+    @staticmethod
+    def _segment(value):
+        if value is None:
+            return None
+        if (not isinstance(value, (list, tuple)) or len(value) != 2 or
+                any(type(v) not in (int, float) for v in value) or not 0 <= value[0] < value[1] <= 1):
+            raise ValueError('invalid display edge segment')
+        return tuple(value)
+
+    def mapped_offset(self, offset):
+        if self.segment is not None and self.target_segment is not None:
+            fraction = _clamp((offset-self.segment[0])/(self.segment[1]-self.segment[0]), 0, 1)
+            return self.target_segment[0]+fraction*(self.target_segment[1]-self.target_segment[0])
+        return offset
 
     @property
     def pressure(self) -> float:
@@ -263,6 +281,13 @@ class ReturnEdge:
         x, y = pointer
         target = display_map.get(self.display) if self.display and isinstance(display_map, dict) else None
         if isinstance(target, Rect):
+            if not (target.x-1.5 <= x <= target.right+1.5 and target.y-1.5 <= y <= target.bottom+1.5):
+                return False
+            if self.segment is not None:
+                fraction = edge_offset(target, self.edge, pointer)
+                if not (self.segment[0] <= fraction and
+                        (fraction < self.segment[1] or self.segment[1] == 1 and fraction <= 1)):
+                    return False
             along = target.y <= y <= target.bottom if self.edge in ("left", "right") else target.x <= x <= target.right
             near = {
                 "left": x <= target.x + 1.5,
@@ -312,7 +337,7 @@ class ReturnEdge:
         self._travel += outward
         if self._travel >= self.resistance_px:
             self.armed = False
-            offset = edge_offset(edge_bounds, self.edge, pointer)
+            offset = self.mapped_offset(edge_offset(edge_bounds, self.edge, pointer))
             self._travel = 0.0
             # A display and its side go together (WIRE.md section 5), as the Mac's engine sends them.
             return Outcome(CROSS, 1.0, edge=OPPOSITE[self.edge], offset=offset,
@@ -331,9 +356,10 @@ class PartEdge(ReturnEdge):
     thirds are measured along the display the pointer is on, by `display_fraction`."""
 
     def __init__(self, edge: str, parts, resistance_px: int = DEFAULT_RESISTANCE_PX, clock=time.monotonic,
-                 display: str = None, target_display: str = None, target_side: str = None) -> None:
+                 display: str = None, target_display: str = None, target_side: str = None,
+                 segment=None, target_segment=None) -> None:
         super().__init__(edge, resistance_px, clock, display=display, target_display=target_display,
-                         target_side=target_side)
+                         target_side=target_side, segment=segment, target_segment=target_segment)
         self.parts = frozenset(part for part in parts if part in PARTS)
 
     def _at_edge(self, monitors: List[Rect], pointer: Tuple[int, int], display_map=None) -> bool:

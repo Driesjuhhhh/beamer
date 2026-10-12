@@ -136,7 +136,7 @@ def mouse_event(message: int, mouse_data: int):
     return None
 
 
-def internal_seam_position(point, monitors, display_map, models):
+def internal_seam_position(point, monitors, display_map, models, previous=None):
     """Return the owning display edge when `point` has crossed an armed internal seam."""
     x, y = point
     for model in models:
@@ -144,6 +144,8 @@ def internal_seam_position(point, monitors, display_map, models):
         edge = getattr(model, "edge", None)
         rect = display_map.get(display) if isinstance(display, str) else None
         if rect is None or edge not in ("left", "right", "top", "bottom"):
+            continue
+        if previous is not None and not (rect.x <= previous[0] <= rect.right and rect.y <= previous[1] <= rect.bottom):
             continue
         if edge in ("left", "right"):
             if not rect.y <= y <= rect.bottom:
