@@ -28,6 +28,98 @@ def settings():
 
 
 class CrossingStateTests(unittest.TestCase):
+    def test_light_edge_snap_keeps_the_tangential_position(self):
+        target = dict(x=0, y=0, w=100, h=100)
+        screen = dict(x=103, y=17, w=80, h=60)
+        self.assertEqual(ways.snap_screen_position(screen, [target], 4),
+                         dict(x=100, y=17, w=80, h=60))
+        distant = {**screen, "x": 105}
+        self.assertEqual(ways.snap_screen_position(distant, [target], 4), distant)
+        above = dict(x=23, y=-63, w=80, h=60)
+        self.assertEqual(ways.snap_screen_position(above, [target], 4),
+                         dict(x=23, y=-60, w=80, h=60))
+
+    def test_scaled_screen_edges_can_snap_exactly_with_integer_offsets(self):
+        group = tile(w=160, displays={
+            "left": dict(x=0, y=0, w=1920, h=1080),
+            "right": dict(x=1920, y=0, w=2560, h=1440)})
+        left, right = ways._display_frames(group)
+        self.assertEqual(left["x"] + left["w"], right["x"])
+        self.assertEqual(right["x"] + right["w"], 160)
+        self.assertTrue(all(type(frame[key]) is int for frame in (left, right) for key in ("x", "y", "w", "h")))
+
+    def test_screen_drop_does_not_jump_to_a_third_or_move_its_sibling(self):
+        held = settings()
+        held["layout"][A] = tile(250, displays={"main": dict(x=0, y=0, w=100, h=100)})
+        picture = copy.deepcopy(held["layout"])
+        picture[A]["display_offsets"] = {"main": dict(x=-87, y=17)}
+        out = self.state().drop(held, picture, A, capable={OWN, A}, snap_radius=4, **self.args())
+        self.assertTrue(out["accepted"])
+        frame = ways._display_frames(out["settings"]["layout"][A])[0]
+        self.assertEqual((frame["x"], frame["y"]), (160, 17))
+        self.assertEqual(out["settings"]["layout"][OWN], held["layout"][OWN])
+
+    def test_remote_screen_between_local_screens_crosses_to_both_named_displays(self):
+        held = settings()
+        held["layout"] = {
+            OWN: tile(w=200, displays={
+                "left": dict(x=0, y=0, w=100, h=100),
+                "right": dict(x=100, y=0, w=100, h=100)}),
+            A: tile(300, w=100, displays={"main": dict(x=0, y=0, w=100, h=100)})}
+        picture = copy.deepcopy(held["layout"])
+        picture[OWN]["display_offsets"] = {"right": dict(x=100, y=0)}
+        moved = self.state().drop(held, picture, OWN, capable={OWN, A}, snap_radius=12, **self.args())
+        self.assertTrue(moved["accepted"])
+        self.assertTrue(moved["send_picture"])
+        self.assertEqual(moved["settings"]["layout"][OWN]["x"], 0)
+        picture = copy.deepcopy(moved["settings"]["layout"])
+        picture[A]["display_offsets"] = {"main": dict(x=-200, y=0)}
+        placed = self.state().drop(moved["settings"], picture, A, capable={OWN, A},
+                                   snap_radius=12, **self.args())
+        self.assertTrue(placed["accepted"])
+        saved = placed["settings"]
+        zones = [zone for zone in saved["zones"] if zone["kind"] == "edge"]
+        self.assertEqual({(zone["display"], zone["side"], zone["target_display"], zone["target_side"])
+                          for zone in zones},
+                         {("left", "right", "main", "left"), ("right", "left", "main", "right")})
+        # The peer compiles the same shared picture from its own perspective.
+        remote = {**copy.deepcopy(saved), "machine_id": A,
+                  "peers": [{"id": OWN, "port": 24820, "side": "left"}]}
+        reverse = ways.compile_layout(remote, remote["layout"], capable={OWN, A})["settings"]
+        back = [zone for zone in reverse["zones"] if zone["kind"] == "edge"]
+        self.assertEqual({(zone["side"], zone["target_display"], zone["target_side"]) for zone in back},
+                         {("left", "left", "right"), ("right", "right", "left")})
+        physical = {"left": return_edge.Rect(0, 0, 100, 100),
+                    "right": return_edge.Rect(100, 0, 100, 100)}
+        for zone in zones:
+            model = return_edge.ReturnEdge(zone["side"], resistance_px=1, display=zone["display"],
+                                           target_display=zone["target_display"], target_side=zone["target_side"])
+            pointer = (99, 50) if zone["display"] == "left" else (100, 50)
+            dx = 2 if zone["side"] == "right" else -2
+            self.assertEqual(model.feed(list(physical.values()), pointer, dx, 0,
+                                        display_map=physical).action, return_edge.CROSS)
+        for zone in back:
+            landing = return_edge.arrival_position(list(physical.values()), "left", 0.5,
+                                                   display=zone["target_display"], side=zone["target_side"],
+                                                   display_map=physical)
+            self.assertEqual(landing, (99, 50) if zone["target_display"] == "left" else (100, 50))
+        self.assertFalse(ways.refresh_displays(saved, physical))
+        self.assertEqual(saved["layout"][OWN]["display_offsets"]["right"], dict(x=100, y=0))
+
+    def test_screen_drop_snaps_only_the_moved_screen(self):
+        held = settings()
+        held["layout"][A] = tile(170, w=160, displays={
+            "left": dict(x=0, y=0, w=100, h=100),
+            "right": dict(x=100, y=0, w=100, h=100)})
+        picture = copy.deepcopy(held["layout"])
+        picture[A]["display_offsets"] = {"left": dict(x=-5, y=0)}
+        out = self.state().drop(held, picture, A, capable={OWN, A}, snap_radius=12, **self.args())
+        self.assertTrue(out["accepted"])
+        frames = ways._display_frames(out["settings"]["layout"][A])
+        self.assertEqual(frames[0]["x"], 160)
+        self.assertEqual(frames[1]["x"], 250)
+        self.assertEqual(held["layout"][A]["x"], 170)
+
     def state(self):
         from core import crossing_state
         return crossing_state

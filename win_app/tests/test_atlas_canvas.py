@@ -102,7 +102,7 @@ class AtlasCanvasTests(unittest.TestCase):
         self.assertFalse(ways._overlaps(drops[0][0]["peer"], drops[0][0]["home"]))
         self.assertEqual(drops[0][0]["peer"], drops[0][3]["snap"]["peer"])
 
-    def test_alt_click_splits_a_display_and_drag_moves_only_that_display(self):
+    def test_alt_click_does_not_regroup_a_display_and_drag_moves_only_that_display(self):
         from PySide6.QtCore import QPoint, Qt
         from PySide6.QtTest import QTest
 
@@ -123,8 +123,8 @@ class AtlasCanvasTests(unittest.TestCase):
 
         point = canvas.display_rect("peer", "right").center().toPoint()
         QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.AltModifier, pos=point)
-        self.assertIn("right", canvas.tiles["peer"]["display_offsets"])
-        self.assertEqual(drops[-1][1], "peer")
+        self.assertNotIn("display_offsets", canvas.tiles["peer"])
+        self.assertEqual(drops, [])
 
         before_tile = dict(canvas.tiles["peer"])
         point = canvas.display_rect("peer", "right").center().toPoint()
@@ -132,6 +132,33 @@ class AtlasCanvasTests(unittest.TestCase):
         QTest.mouseMove(canvas, point + QPoint(40, 0), 10)
         QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point + QPoint(40, 0))
         self.assertEqual(canvas.tiles["peer"]["x"], before_tile["x"])
+        self.assertGreater(canvas.tiles["peer"]["display_offsets"]["right"]["x"], 0)
+
+    def test_screen_drag_without_alt_keeps_the_other_screen_in_place(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+        from core import ways
+
+        drops = []
+        canvas = AtlasCanvas(on_drop=lambda tiles, moved: drops.append(tiles))
+        self.addCleanup(canvas.deleteLater)
+        canvas.resize(720, 300)
+        canvas.set_tiles({
+            "home": {"x": 0, "y": 0, "w": 160, "h": 100},
+            "peer": {"x": 172, "y": 0, "w": 160, "h": 100,
+                     "displays": {"left": {"x": 0, "y": 0, "w": 100, "h": 100},
+                                  "right": {"x": 100, "y": 0, "w": 100, "h": 100}}},
+        }, {"home": "This PC", "peer": "Studio"}, {}, "home", own_id="home")
+        canvas.show()
+        self.app.processEvents()
+        before = ways._display_frames(canvas.tiles["peer"])[0]
+        point = canvas.display_rect("peer", "right").center().toPoint()
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(canvas, point + QPoint(40, 0), 10)
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point + QPoint(40, 0))
+        self.assertEqual(len(drops), 1)
+        self.assertEqual(ways._display_frames(canvas.tiles["peer"])[0], before)
         self.assertGreater(canvas.tiles["peer"]["display_offsets"]["right"]["x"], 0)
 
     def test_arrow_moves_focused_tile_a_third_and_announces_sentence(self):
@@ -152,6 +179,80 @@ class AtlasCanvasTests(unittest.TestCase):
         QTest.keyClick(canvas, Qt.Key.Key_Down)
         self.assertEqual(canvas.tiles["peer"]["y"], 33)
         self.assertIn("Studio PC, right of This PC, bottom third.", canvas.accessibleDescription())
+
+    def test_local_screen_can_move_to_make_room_for_another_machine(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+        from core import ways
+
+        drops, selections = [], []
+        canvas = AtlasCanvas(on_drop=lambda tiles, moved: drops.append((tiles, moved)),
+                             on_select=selections.append)
+        self.addCleanup(canvas.deleteLater)
+        canvas.resize(720, 300)
+        canvas.set_tiles({"home": {"x": 0, "y": 0, "w": 200, "h": 100,
+                                   "displays": {"left": dict(x=0, y=0, w=100, h=100),
+                                                "right": dict(x=100, y=0, w=100, h=100)}}},
+                         {"home": "This PC"}, {}, "home", own_id="home")
+        canvas.show()
+        self.app.processEvents()
+        before = ways._display_frames(canvas.tiles["home"])[0]
+        point = canvas.display_rect("home", "right").center().toPoint()
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(canvas, point + QPoint(60, 0), 10)
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point + QPoint(60, 0))
+        self.assertEqual(len(drops), 1)
+        self.assertEqual(drops[0][1], "home")
+        self.assertEqual(selections, [])
+        self.assertEqual(ways._display_frames(canvas.tiles["home"])[0], before)
+        self.assertGreater(canvas.tiles["home"]["display_offsets"]["right"]["x"], 0)
+
+    def test_empty_group_area_does_not_drag_both_screens(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+
+        drops = []
+        canvas = AtlasCanvas(on_drop=lambda tiles, moved: drops.append(tiles))
+        self.addCleanup(canvas.deleteLater)
+        canvas.resize(720, 300)
+        canvas.set_tiles({"home": dict(x=0, y=0, w=160, h=100),
+                          "peer": dict(x=200, y=0, w=160, h=100,
+                                       displays={"left": dict(x=0, y=0, w=100, h=100),
+                                                 "right": dict(x=100, y=0, w=100, h=100)},
+                                       display_offsets={"left": dict(x=0, y=150),
+                                                        "right": dict(x=0, y=150)})},
+                         {"home": "This PC", "peer": "Studio"}, {}, "peer", own_id="home")
+        canvas.show()
+        self.app.processEvents()
+        point = canvas.tile_rect("peer").center().toPoint()
+        self.assertEqual(canvas.display_at(canvas.tile_rect("peer").center()), (None, None))
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(canvas, point + QPoint(40, 0), 10)
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point + QPoint(40, 0))
+        self.assertEqual(drops, [])
+        self.assertEqual(canvas.tiles["peer"]["x"], 200)
+
+    def test_arrow_moves_only_the_selected_screen(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+        from core import ways
+
+        drops = []
+        canvas = AtlasCanvas(on_drop=lambda tiles, moved: drops.append(tiles))
+        self.addCleanup(canvas.deleteLater)
+        canvas.set_tiles({"home": dict(x=0, y=0, w=200, h=100,
+                                      displays={"left": dict(x=0, y=0, w=100, h=100),
+                                                "right": dict(x=100, y=0, w=100, h=100)})},
+                         {"home": "This PC"}, {}, "home", own_id="home")
+        canvas.selected_display = ("home", "right")
+        before = ways._display_frames(canvas.tiles["home"])[0]
+        QTest.keyClick(canvas, Qt.Key.Key_Down)
+        self.assertEqual(len(drops), 1)
+        self.assertEqual(ways._display_frames(canvas.tiles["home"])[0], before)
+        self.assertEqual(canvas.tiles["home"]["display_offsets"]["right"], dict(x=0, y=10))
 
     def test_rename_cancel_and_save_actions(self):
         from PySide6.QtCore import Qt

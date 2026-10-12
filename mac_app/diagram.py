@@ -385,7 +385,7 @@ class AtlasCanvas(AppKit.NSView):
 
     @staticmethod
     def snap_radius_for_scale(scale):
-        return 12 / max(float(scale), 0.01)
+        return core_ways.SCREEN_SNAP_PX / max(float(scale), 0.01)
 
     def isFlipped(self):
         return True
@@ -403,6 +403,7 @@ class AtlasCanvas(AppKit.NSView):
         self.labels = {}
         self.older = set()
         self.selected = None
+        self.selected_display = None
         self.own_id = ""
         self.cycle = {}
         self.cycle_enabled = False
@@ -685,10 +686,8 @@ class AtlasCanvas(AppKit.NSView):
                           tile["w"] * scale, tile["h"] * scale)
                     for key, tile in self.tiles.items()}, scale
         panels = [frame for tile in self.tiles.values() for frame in core_ways._display_frames(tile)]
-        horizontal = [(tile["x"], tile["x"] + tile["w"]) for tile in self.tiles.values()]
-        vertical = [(tile["y"], tile["y"] + tile["h"]) for tile in self.tiles.values()]
-        horizontal.extend((frame["x"], frame["x"] + frame["w"]) for frame in panels)
-        vertical.extend((frame["y"], frame["y"] + frame["h"]) for frame in panels)
+        horizontal = [(frame["x"], frame["x"] + frame["w"]) for frame in panels]
+        vertical = [(frame["y"], frame["y"] + frame["h"]) for frame in panels]
         left = min(edge for pair in horizontal for edge in pair)
         right = max(edge for pair in horizontal for edge in pair)
         top = min(edge for pair in vertical for edge in pair)
@@ -729,11 +728,13 @@ class AtlasCanvas(AppKit.NSView):
                        "ink_3" if hover else "amber" if gap else "edge")
             tile.setOpacity_(0.42 if inactive else 1.0)
             screens = core_ways._display_frames(self.tiles[key]) if self.tiles[key].get("displays") else []
+            tile.setHidden_(bool(screens))
             layers = self.display_layers.setdefault(key, [])
             while len(layers) < len(screens):
                 screen_layer = Quartz.CALayer.layer()
                 screen_layer.setBorderWidth_(1)
                 screen_layer.setCornerRadius_(2)
+                screen_layer.addSublayer_(_text_layer(12, "ink"))
                 # Directly above the tile, under its labels: a snapshot (cacheDisplayInRect) draws
                 # sublayers in array order and ignores zPosition, so appended they hid the name.
                 self.layer().insertSublayer_above_(screen_layer, layers[-1] if layers else tile)
@@ -750,7 +751,14 @@ class AtlasCanvas(AppKit.NSView):
                              screen["y"] * scale_y + frame[1] - self.tiles[key]["y"] * scale_y),
                             (screen["w"] * scale_x, screen["h"] * scale_y)))
                 layer.setHidden_(False)
-                theme.tint(layer, background="well", border="edge")
+                screen_selected = selected and self.selected_display == (key, screen["display"])
+                layer.setBorderWidth_(2 if screen_selected else 1)
+                theme.tint(layer, background="well", border="ink_2" if screen_selected else "edge")
+                screen_title = layer.sublayers()[0]
+                screen_title.setString_(f"{self.labels.get(key, 'Machine')} · Screen {index + 1}")
+                _set_layer_frame_if_changed(screen_title, ((6, 6),
+                                                          (max(1, screen["w"] * scale_x - 12), 18)))
+                theme.tint(screen_title, foreground="ink")
             title.setString_(self.labels.get(key, f"Machine · {key[-6:]}"))
             _set_layer_frame_if_changed(title, _rect(self._title_rect(key, frame)))
             status_info = self.states.get(key, {})
@@ -792,11 +800,17 @@ class AtlasCanvas(AppKit.NSView):
             cycle_layer.setBorderWidth_(0 if ticked else 1)
             theme.tint(cycle_layer, background="ink_2" if ticked else "well", border="edge")
             cycle_layer.sublayers()[0].setHidden_(not ticked)
+            if screens:
+                for machine_layer in (title, state_layer, outcome_layer, dot):
+                    machine_layer.setHidden_(True)
+            else:
+                title.setHidden_(False)
             if self.display_layers.get(key):
                 z_position = max(layer.zPosition() for layer in self.display_layers[key]) + 1.0
                 for layer in (title, state_layer, outcome_layer, dot, cycle_layer):
                     layer.setZPosition_(z_position)
-        focus = frames.get(self.selected) if self.keyboard_focus else None
+        focus = (frames.get(self.selected) if self.keyboard_focus and
+                 not self.tiles.get(self.selected, {}).get("displays") else None)
         self.focus_layer.setHidden_(focus is None)
         if focus is not None:
             _set_layer_frame_if_changed(
@@ -1277,6 +1291,7 @@ class AtlasCanvas(AppKit.NSView):
     @objc.python_method
     def _show_recentre(self):
         return (self.selected not in (None, self.own_id) and self.selected in self.tiles
+                and not self.tiles[self.selected].get("displays")
                 and self.own_id in self.tiles and not self._is_centred(self.selected))
 
     @objc.python_method
@@ -1407,6 +1422,8 @@ class AtlasCanvas(AppKit.NSView):
         key, display = self.display_at(point)
         if key is None:
             key = self.tile_at(point)
+            if key is not None and self.tiles[key].get("displays"):
+                return
         if key is None:
             return
         if event.clickCount() > 1 and key != self.own_id and self.on_rename:
@@ -1422,29 +1439,30 @@ class AtlasCanvas(AppKit.NSView):
                 self.on_cycle_change(key, self.cycle[key])
             self._draw(False)
             return
-        if key == self.own_id:
+        if key == self.own_id and display is None:
             return
         self._stop_tile_animations(key)
         self.keyboard_focus = False
         self.selected = key
         self.last_announcement = ""
+        self.selected_display = (key, display) if display is not None else None
         frames, scale = self._map()
         origin_id = self.own_id if self.own_id in frames else key
         origin = self.tiles[origin_id]
         map_x = frames[origin_id][0] - origin["x"] * scale
         map_y = frames[origin_id][1] - origin["y"] * scale
-        if self.on_select:
+        if self.on_select and key != self.own_id:
             self.on_select(key)
         offsets = self.tiles[key].get("display_offsets", {})
         split = display is not None and display in offsets
         option = bool(event.modifierFlags() & AppKit.NSEventModifierFlagOption)
-        if display is not None and (split or option):
+        if display is not None:
             self.dragging = {"key": key, "display": display, "display_offset": dict(offsets.get(display, {"x": 0, "y": 0})),
                              "pointer_x": point.x, "pointer_y": point.y,
                              "scale": scale,
                              "map_x": map_x, "map_y": map_y,
                              "moved": False,
-                             "split_toggle": option and not split, "group_toggle": option and split}
+                             "split_toggle": False, "group_toggle": False}
             AppKit.NSCursor.closedHandCursor().set()
             self._draw(False)
             return
@@ -1501,7 +1519,7 @@ class AtlasCanvas(AppKit.NSView):
         if preview is not None:
             self._draw(True)
         AppKit.NSCursor.arrowCursor().set()
-        if key != self.own_id and self.on_layout_change and (moved or (display is not None and (split_toggle or group_toggle))):
+        if (key != self.own_id or display is not None) and self.on_layout_change and (moved or (display is not None and (split_toggle or group_toggle))):
             point = self.convertPoint_fromView_(event.locationInWindow(), None)
             if display is not None and not moved and (split_toggle or group_toggle):
                 tile = dict(self.tiles[key])
@@ -1521,7 +1539,7 @@ class AtlasCanvas(AppKit.NSView):
                 return
             # The preview already decided any snap; a second snap in the app, on the scale after the
             # drop, could move a tile the preview said would stay.
-            self.on_layout_change(self.tiles, key, snap=False)
+            self.on_layout_change(self.tiles, key, snap=display is not None)
 
     def keyDown_(self, event):
         self.keyboard_focus = True
@@ -1546,6 +1564,19 @@ class AtlasCanvas(AppKit.NSView):
             self.keyboard_focus = False
             self._draw(False)
         if vector is not None and self.selected not in self.tiles:
+            return
+        if vector is not None and self.tiles[self.selected].get("displays"):
+            tile = dict(self.tiles[self.selected])
+            display = (self.selected_display[1] if self.selected_display is not None and
+                       self.selected_display[0] == self.selected else core_ways._display_frames(tile)[0]["display"])
+            offsets = dict(tile.get("display_offsets", {}))
+            offset = offsets.get(display, {"x": 0, "y": 0})
+            offsets[display] = {"x": offset["x"] + 10*vector[0], "y": offset["y"] + 10*vector[1]}
+            self.tiles[self.selected] = {**tile, "display_offsets": offsets}
+            self.selected_display = (self.selected, display)
+            self._draw(False)
+            if self.on_layout_change:
+                self.on_layout_change(self.tiles, self.selected)
             return
         if vector is None or self.selected is None or self.selected == self.own_id:
             objc.super(AtlasCanvas, self).keyDown_(event)

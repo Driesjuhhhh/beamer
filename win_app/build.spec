@@ -23,6 +23,12 @@ analysis = Analysis(
     noarchive=False,
 )
 
+# Qt uses Windows' ICU API. A build host's PATH can contain another icuuc.dll
+# (for example Poppler's versioned ICU), whose exports are incompatible with Qt.
+# The Universal CRT likewise belongs to Windows, not a tool on the build PATH.
+analysis.binaries = [entry for entry in analysis.binaries
+                     if Path(entry[0]).name.lower() not in {"icuuc.dll", "ucrtbase.dll"}]
+
 python_archive = PYZ(analysis.pure)
 
 executable = EXE(

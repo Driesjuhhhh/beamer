@@ -86,6 +86,14 @@ machine's settings.
 
 ## Screenshots
 
+Crossing shows each reported monitor as its own screen, labelled with its machine name and screen
+number. Drag any screen, including this machine's screens, directly to arrange it; its sibling
+screens stay in place. You can leave a gap between this machine's screens and put another
+machine's screen between them. Screens have a light, four-pixel edge snap that keeps their
+position along the edge, without jumping to a centre or a third. Crossing follows
+their touching borders. These positions configure Beamer; they do not change Windows' display settings.
+Machines that do not report their displays keep a single machine tile.
+
 In your own appearance: light if your GitHub is light, dark if it is dark.
 
 <table>

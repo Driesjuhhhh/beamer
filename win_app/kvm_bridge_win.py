@@ -1980,12 +1980,12 @@ class WindowsApplication(QWidget):
 
     @_crossing_refresh
     def _layout_dropped(self, layout: dict, moved: str) -> bool:
-        if not self._config or moved == self._config.machine_id or moved not in layout:
+        if not self._config or moved not in layout:
             self._reflect_ways()
             return False
         with app_config.SETTINGS_LOCK:
             settings = app_config.load_settings(self.config_path)
-            outcome = crossing_state.drop(settings, layout, moved, snap_radius=12 / max(self.atlas_canvas._scale, 0.001),
+            outcome = crossing_state.drop(settings, layout, moved, snap_radius=ways.SCREEN_SNAP_PX / max(self.atlas_canvas._scale, 0.001),
                                           **self._crossing_event_args())
             if not outcome["accepted"]:
                 self._reflect_ways()

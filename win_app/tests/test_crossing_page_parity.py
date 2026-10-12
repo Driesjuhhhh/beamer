@@ -44,6 +44,22 @@ def position(widget, root):
 
 
 class CrossingPageParityTests(unittest.TestCase):
+    def test_drop_of_local_screen_is_saved_by_the_application(self):
+        import copy
+
+        held = app_config.load_settings(self.path)
+        own = held["machine_id"]
+        held["layout"][own]["displays"] = {
+            "left": dict(x=0, y=0, w=100, h=100),
+            "right": dict(x=100, y=0, w=100, h=100)}
+        app_config.write_settings(self.path, held)
+        picture = copy.deepcopy(held["layout"])
+        picture[own]["display_offsets"] = {"right": dict(x=0, y=200)}
+        self.assertTrue(self.window._layout_dropped(picture, own))
+        saved = app_config.load_settings(self.path)
+        self.assertEqual(saved["layout"][own]["display_offsets"]["right"], dict(x=0, y=200))
+        self.assertEqual(saved["layout"][own]["x"], held["layout"][own]["x"])
+
     def setUp(self):
         self.app = QApplication.instance() or QApplication([])
         theme.init_fonts()

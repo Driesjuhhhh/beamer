@@ -91,9 +91,29 @@ def drop(settings, tiles, moved, *, platform, capable, live, gone, now, snap_rad
         return _outcome(settings, accepted=False)
     held = saved["layout"]
     active = copy.deepcopy({peer: tile for peer, tile in tiles.items() if peer not in shelf})
+    # A screen drag changes offsets, not the machine's origin. Snap that screen
+    # against individual screens without moving its siblings.
+    screen_drag = (moved in active and moved in held and
+                   active[moved].get("display_offsets", {}) != held[moved].get("display_offsets", {}))
+    if screen_drag and ways._valid_tile_displays(active[moved]):
+        tile = active[moved]
+        offsets = tile.get("display_offsets", {})
+        previous = held[moved].get("display_offsets", {})
+        for screen in ways._display_frames(tile):
+            display = screen["display"]
+            if display not in offsets or offsets[display] == previous.get(display, {"x": 0, "y": 0}):
+                continue
+            targets = [frame for peer, other in active.items()
+                       for frame in ways._display_frames(other)
+                       if peer != moved or frame["display"] != display]
+            snap = ways.snap_screen_position(screen, targets, snap_radius)
+            offsets[display] = {"x": offsets[display]["x"] + round(snap["x"]-screen["x"]),
+                                "y": offsets[display]["y"] + round(snap["y"]-screen["y"])}
     result = ways.compile_layout(saved, active, moved=moved, platform=platform,
                                 capable=capable, live=live, gone=gone, now=now)
     if not result["accepted"]:
+        if screen_drag:
+            return _outcome(settings, result=result, accepted=False)
         snap = result.get("snap", {}).get(moved)
         if snap is None or snap == active.get(moved):
             return _outcome(settings, result=result, accepted=False)
@@ -102,7 +122,7 @@ def drop(settings, tiles, moved, *, platform, capable, live, gone, now, snap_rad
                                     capable=capable, live=live, gone=gone, now=now)
         if not result["accepted"]:
             return _outcome(settings, result=result, accepted=False)
-    if moved in active and moved != saved.get("machine_id"):
+    if not screen_drag and moved in active and moved != saved.get("machine_id"):
         original = active[moved]
         others = {peer: tile for peer, tile in active.items() if peer != moved}
         snap = ways.snap_position(original, saved["machine_id"], others, radius=snap_radius)

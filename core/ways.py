@@ -283,11 +283,40 @@ def _display_frames(tile):
     scale_y = tile["h"] / (bottom - top)
     offset_x, offset_y = tile["x"], tile["y"]
     offsets = tile.get("display_offsets", {})
+    # Round shared boundaries rather than widths independently: stored screen
+    # offsets are integer units, so fractional edges could never snap exactly.
     return [{"display": key,
-             "x": offset_x + (rect["x"] - left) * scale_x + offsets.get(key, {}).get("x", 0),
-             "y": offset_y + (rect["y"] - top) * scale_y + offsets.get(key, {}).get("y", 0),
-             "w": rect["w"] * scale_x, "h": rect["h"] * scale_y}
+             "x": offset_x + round((rect["x"] - left) * scale_x) + offsets.get(key, {}).get("x", 0),
+             "y": offset_y + round((rect["y"] - top) * scale_y) + offsets.get(key, {}).get("y", 0),
+             "w": max(1, round((rect["x"] + rect["w"] - left) * scale_x) - round((rect["x"] - left) * scale_x)),
+             "h": max(1, round((rect["y"] + rect["h"] - top) * scale_y) - round((rect["y"] - top) * scale_y))}
             for key, rect in sorted(screens.items(), key=lambda item: (item[1]["y"], item[1]["x"], item[0]))]
+
+
+SCREEN_SNAP_PX = 4
+
+
+def snap_screen_position(screen, targets, radius):
+    """A small edge magnet, preserving the position along the touching edge.
+
+    Screen placement has no thirds, centre preference or distant fallback.
+    """
+    candidates = [dict(screen)]
+    x, y, w, h = (screen[key] for key in ("x", "y", "w", "h"))
+    for target in targets:
+        tx, ty, tw, th = (target[key] for key in ("x", "y", "w", "h"))
+        if min(y+h, ty+th) > max(y, ty):
+            for cx in (tx-w, tx+tw):
+                if abs(cx-x) <= radius:
+                    candidates.append({**screen, "x": cx})
+        if min(x+w, tx+tw) > max(x, tx):
+            for cy in (ty-h, ty+th):
+                if abs(cy-y) <= radius:
+                    candidates.append({**screen, "y": cy})
+    free = [candidate for candidate in candidates[1:]
+            if not any(_overlaps(candidate, target) for target in targets)]
+    return min(free, key=lambda candidate: abs(candidate["x"]-x)+abs(candidate["y"]-y),
+               default=dict(screen))
 
 
 def snap_position(tile, own_id, layout, radius=12):

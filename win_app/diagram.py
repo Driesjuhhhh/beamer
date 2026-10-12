@@ -359,6 +359,7 @@ class AtlasCanvas(QWidget):
         self.labels = {}
         self.states = {}
         self.selected = None
+        self.selected_display = None
         self.own_id = None
         self.shelf_ids = set()
         self.left_out_ids = set()
@@ -489,12 +490,10 @@ class AtlasCanvas(QWidget):
             self._origin = QPointF(12, 12)
             return
         frames = [frame for tile in visible.values() for frame in ways._display_frames(tile)]
-        left = min([tile["x"] for tile in visible.values()] + [frame["x"] for frame in frames])
-        top = min([tile["y"] for tile in visible.values()] + [frame["y"] for frame in frames])
-        right = max([tile["x"] + tile["w"] for tile in visible.values()] +
-                    [frame["x"] + frame["w"] for frame in frames])
-        bottom = max([tile["y"] + tile["h"] for tile in visible.values()] +
-                     [frame["y"] + frame["h"] for frame in frames])
+        left = min(frame["x"] for frame in frames)
+        top = min(frame["y"] for frame in frames)
+        right = max(frame["x"] + frame["w"] for frame in frames)
+        bottom = max(frame["y"] + frame["h"] for frame in frames)
         cx, cy = (left+right)/2, (top+bottom)/2
         self._bounds = (cx, cy, right-left, bottom-top)
         room_w, room_h = max(1, self.width()-24), max(1, self.height()-24)
@@ -528,6 +527,8 @@ class AtlasCanvas(QWidget):
                    + (targets[side]["y"]-tile["y"])**2)
 
     def _can_recentre(self):
+        if self.selected in self.tiles and self.tiles[self.selected].get("displays"):
+            return False
         side = self._recentre_side()
         if side is None:
             return False
@@ -772,13 +773,40 @@ class AtlasCanvas(QWidget):
             painter.setOpacity(0.55 if inactive else 1.0)
             painter.setPen(QPen(_colour(line), 2.0 if chosen and not is_own else 1.0))
             painter.setBrush(_colour(fill))
-            painter.drawRoundedRect(rect, tokens.RADIUS["button"], tokens.RADIUS["button"])
+            if not tile.get("displays"):
+                painter.drawRoundedRect(rect, tokens.RADIUS["button"], tokens.RADIUS["button"])
             if tile.get("displays"):
-                for screen in ways._display_frames(tile):
+                for number, screen in enumerate(ways._display_frames(tile), 1):
                     screen_rect = self.display_rect(peer, screen["display"]).adjusted(2, 2, -2, -2)
-                    painter.setPen(QPen(_colour("edge"), 1.0))
+                    screen_chosen = chosen and self.selected_display == (peer, screen["display"])
+                    painter.setPen(QPen(_colour("ink_2" if screen_chosen else "edge"), 2.0 if screen_chosen else 1.0))
                     painter.setBrush(_colour("well"))
                     painter.drawRoundedRect(screen_rect, 2, 2)
+                    painter.setPen(_colour("ink"))
+                    painter.setFont(theme.font(tokens.TYPE["body"], 650))
+                    title = f"{self.labels.get(peer, 'Machine')} · Screen {number}"
+                    painter.drawText(screen_rect.adjusted(6, 6, -6, -6), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+                                     painter.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight,
+                                                                     max(1, round(screen_rect.width()-12))))
+                    painter.setFont(theme.font(tokens.TYPE["note"]))
+                    painter.setPen(_colour("ink_3"))
+                    status = self.states.get(peer, {}).get("detail", "")
+                    if status and screen_rect.height() >= 56:
+                        painter.drawText(screen_rect.adjusted(6, 30, -6, -6),
+                                         Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+                                         painter.fontMetrics().elidedText(status, Qt.TextElideMode.ElideRight,
+                                                                         max(1, round(screen_rect.width()-12))))
+                if self._shows_cycle(peer):
+                    box = self._cycle_box(rect)
+                    ticked = bool(self.cycle.get(peer, True))
+                    painter.setPen(QPen(_colour("edge"), 1))
+                    painter.setBrush(_colour("ink_2" if ticked else "well"))
+                    painter.drawRoundedRect(box, 3, 3)
+                    if ticked:
+                        painter.setPen(_colour("ground"))
+                        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, "✓")
+                painter.setOpacity(1.0)
+                continue
             state_data = self.states.get(peer, {})
             dot_colour = "signal" if state_data.get("linked") else "amber" if state_data.get("legacy") else "ink_3"
             painter.setPen(Qt.PenStyle.NoPen)
@@ -919,7 +947,12 @@ class AtlasCanvas(QWidget):
         if self.hasFocus() and self.selected in self.tiles and self._keyboard_focus:
             painter.setPen(QPen(_colour("ink_2"), 2.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(self.tile_rect(self.selected).adjusted(-3, -3, 3, 3), 3, 3)
+            for screen in ways._display_frames(self.tiles[self.selected]):
+                if self.selected_display is not None and self.selected_display != (self.selected, screen["display"]):
+                    continue
+                rect = (self.display_rect(self.selected, screen["display"])
+                        if screen["display"] is not None else self.tile_rect(self.selected))
+                painter.drawRoundedRect(rect.adjusted(-3, -3, 3, 3), 3, 3)
         painter.end()
 
     def _own_id(self):
@@ -933,24 +966,28 @@ class AtlasCanvas(QWidget):
             event.accept()
             return
         display_peer, display = self.display_at(point)
-        if display_peer is not None and display_peer != self._own_id():
+        if display_peer is not None:
+            if self._shows_cycle(display_peer) and self._cycle_hit_rect(self.tile_rect(display_peer)).contains(point):
+                self.set_cycle(display_peer, not self.cycle.get(display_peer, True))
+                event.accept()
+                return
             offsets = self.tiles[display_peer].get("display_offsets", {})
-            split = display in offsets
-            alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
-            if split or alt:
+            if display is not None:
                 motion.stop(self, f"tile:{display_peer}")
                 self.selected = display_peer
+                self.selected_display = (display_peer, display)
                 self._drag = display_peer
                 self._drag_display = display
                 self._dragged_display = False
                 self._display_offset_start = dict(offsets.get(display, {"x": 0, "y": 0}))
-                self._split_on_release = alt and not split
-                self._group_on_release = alt and split
+                self._split_on_release = False
+                self._group_on_release = False
                 self._drag_start = QPointF(point)
                 self._tile_start = dict(self.tiles[display_peer])
                 self.setFocus(Qt.FocusReason.MouseFocusReason)
                 self._keyboard_focus = False
-                self.on_select(display_peer)
+                if display_peer != self._own_id():
+                    self.on_select(display_peer)
                 self.update()
                 event.accept()
                 return
@@ -966,7 +1003,10 @@ class AtlasCanvas(QWidget):
                     self.set_cycle(peer, not self.cycle.get(peer, True))
                     event.accept()
                     return
+                if self.tiles[peer].get("displays"):
+                    continue
                 self.selected = peer
+                self.selected_display = None
                 motion.stop(self, f"tile:{peer}")
                 self._drag = peer
                 self._drag_start = QPointF(point)
@@ -1002,7 +1042,11 @@ class AtlasCanvas(QWidget):
             event.accept()
             return
         third = self._third_segment_at(event.position())
-        hovered = next((peer for peer in self.tiles if peer not in self.shelf_ids and self.tile_rect(peer).contains(event.position())), None)
+        hovered, _display = self.display_at(event.position())
+        if hovered is None:
+            hovered = next((peer for peer in self.tiles if peer not in self.shelf_ids and
+                            not self.tiles[peer].get("displays") and
+                            self.tile_rect(peer).contains(event.position())), None)
         if hovered != self._hover:
             self._hover = hovered
             self.update()
@@ -1011,7 +1055,8 @@ class AtlasCanvas(QWidget):
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
             self.setToolTip(self.labels.get(hovered, "") if hovered else "")
-            self.setCursor(Qt.CursorShape.OpenHandCursor if hovered and hovered != self._own_id()
+            self.setCursor(Qt.CursorShape.OpenHandCursor if hovered and
+                           (hovered != self._own_id() or self.tiles[hovered].get("displays"))
                            else Qt.CursorShape.ArrowCursor)
         if hovered and self._shows_cycle(hovered) and self._cycle_hit_rect(self.tile_rect(hovered)).contains(event.position()):
             QToolTip.showText(self.mapToGlobal(event.position().toPoint()), "In the shortcut's cycle", self)
@@ -1104,6 +1149,19 @@ class AtlasCanvas(QWidget):
         moves = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0),
                  Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1)}
         if event.key() in moves and self.selected in self.shelf_ids:
+            event.accept()
+            return
+        if event.key() in moves and self.selected in self.tiles and self.tiles[self.selected].get("displays"):
+            tile = self.tiles[self.selected]
+            display = (self.selected_display[1] if self.selected_display is not None and
+                       self.selected_display[0] == self.selected else ways._display_frames(tile)[0]["display"])
+            offsets = dict(tile.get("display_offsets", {}))
+            offset = offsets.get(display, {"x": 0, "y": 0})
+            dx, dy = moves[event.key()]
+            offsets[display] = {"x": offset["x"] + 10*dx, "y": offset["y"] + 10*dy}
+            self.tiles[self.selected] = {**tile, "display_offsets": offsets}
+            self.selected_display = (self.selected, display)
+            self._commit_tile(self.selected)
             event.accept()
             return
         if event.key() in moves and self.selected in self.tiles and self.selected != self._own_id():
