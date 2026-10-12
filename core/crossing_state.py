@@ -103,12 +103,7 @@ def drop(settings, tiles, moved, *, platform, capable, live, gone, now, snap_rad
             display = screen["display"]
             if display not in offsets or offsets[display] == previous.get(display, {"x": 0, "y": 0}):
                 continue
-            targets = [frame for peer, other in active.items()
-                       for frame in ways._display_frames(other)
-                       if peer != moved or frame["display"] != display]
-            snap = ways.snap_screen_position(screen, targets, snap_radius)
-            offsets[display] = {"x": offsets[display]["x"] + round(snap["x"]-screen["x"]),
-                                "y": offsets[display]["y"] + round(snap["y"]-screen["y"])}
+            active = ways.snap_screen_layout(active, moved, display, snap_radius)
     result = ways.compile_layout(saved, active, moved=moved, platform=platform,
                                 capable=capable, live=live, gone=gone, now=now)
     if not result["accepted"]:

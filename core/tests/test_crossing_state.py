@@ -35,9 +35,9 @@ class CrossingStateTests(unittest.TestCase):
                          dict(x=100, y=17, w=80, h=60))
         distant = {**screen, "x": 105}
         self.assertEqual(ways.snap_screen_position(distant, [target], 4), distant)
-        above = dict(x=23, y=-63, w=80, h=60)
+        above = dict(x=30, y=-63, w=80, h=60)
         self.assertEqual(ways.snap_screen_position(above, [target], 4),
-                         dict(x=23, y=-60, w=80, h=60))
+                         dict(x=30, y=-60, w=80, h=60))
 
     def test_scaled_screen_edges_can_snap_exactly_with_integer_offsets(self):
         group = tile(w=160, displays={

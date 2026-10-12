@@ -758,7 +758,7 @@ class AtlasCanvas(AppKit.NSView):
             layer.setBorderWidth_(2 if selected else 1)
             layer.setCornerRadius_(4)
             layer.setZPosition_(10)
-            _set_layer_frame_if_changed(layer, _rect((frame[0]+2, frame[1]+2, max(1, frame[2]-4), max(1, frame[3]-4))))
+            _set_layer_frame_if_changed(layer, _rect(frame))
             theme.tint(layer, background="well" if key == self.own_id else "panel",
                        border="ink_2" if selected else "edge")
             title, detail = layer.sublayers()[:2]
@@ -1599,6 +1599,9 @@ class AtlasCanvas(AppKit.NSView):
             offsets[display] = {"x": start["x"] + dx, "y": start["y"] + dy}
             tile["display_offsets"] = offsets
             self.tiles[key] = tile
+            snapped = core_ways.snap_screen_layout(self.tiles, key, display,
+                                                   self.snap_radius_for_scale(scale))
+            self.tiles[key] = snapped[key]
             self.dragging["moved"] = self.dragging["moved"] or bool(dx or dy)
             self._draw(False)
             return
@@ -1649,7 +1652,7 @@ class AtlasCanvas(AppKit.NSView):
                 return
             # The preview already decided any snap; a second snap in the app, on the scale after the
             # drop, could move a tile the preview said would stay.
-            self.on_layout_change(self.tiles, key, snap=display is not None)
+            self.on_layout_change(self.tiles, key, snap=False)
 
     def keyDown_(self, event):
         self.keyboard_focus = True

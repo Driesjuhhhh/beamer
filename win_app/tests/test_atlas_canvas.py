@@ -275,6 +275,32 @@ class AtlasCanvasTests(unittest.TestCase):
         self.assertEqual(canvas.tiles["B"]["display_offsets"]["b2"], moved)
         QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=point + QPoint(40, 0))
 
+    def test_drag_preview_and_release_have_the_same_flush_screen_edges(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from diagram import AtlasCanvas
+        from core import ways
+
+        drops = []
+        canvas = AtlasCanvas(on_drop=lambda tiles, moved: drops.append(tiles))
+        self.addCleanup(canvas.deleteLater)
+        canvas.resize(720, 300)
+        canvas.set_tiles({"home": dict(x=0, y=0, w=100, h=100),
+                          "peer": dict(x=200, y=0, w=100, h=100,
+                                       displays={"main": dict(x=0, y=0, w=100, h=100)})},
+                         {"home": "This PC", "peer": "Other PC"}, {}, "peer", own_id="home")
+        canvas.show()
+        self.app.processEvents()
+        point = canvas.display_rect("peer", "main").center().toPoint()
+        end = point + QPoint(-97, 3)
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(canvas, end, 10)
+        preview = ways._display_frames(canvas.tiles["peer"])[0]
+        self.assertEqual((preview["x"], preview["y"]), (100, 0))
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end)
+        self.assertEqual(len(drops), 1)
+        self.assertEqual(ways._display_frames(drops[0]["peer"])[0], preview)
+
     def test_rename_cancel_and_save_actions(self):
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest

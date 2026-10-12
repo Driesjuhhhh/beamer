@@ -17,6 +17,27 @@ def mixed_layout():
 
 
 class ScreenSceneTests(unittest.TestCase):
+    def test_nearby_edges_align_flush_without_a_distant_jump(self):
+        target = dict(x=0, y=0, w=100, h=100)
+        for screen, expected in (
+            (dict(x=103, y=3, w=100, h=100), (100, 0)),
+            (dict(x=100, y=-3, w=100, h=100), (100, 0)),
+            (dict(x=3, y=103, w=100, h=100), (0, 100)),
+            (dict(x=103, y=17, w=100, h=100), (100, 17)),
+            (dict(x=106, y=3, w=100, h=100), (106, 3))):
+            with self.subTest(screen=screen):
+                snapped = ways.snap_screen_position(screen, [target], 4)
+                self.assertEqual((snapped["x"], snapped["y"]), expected)
+
+    def test_preview_snaps_only_the_selected_screen_and_is_stable(self):
+        layout = mixed_layout()
+        layout["B"]["display_offsets"]["b2"] = dict(x=-98, y=103)
+        preview = ways.snap_screen_layout(layout, "B", "b2", 4)
+        self.assertEqual(preview["B"]["display_offsets"]["b2"], dict(x=-100, y=100))
+        self.assertEqual(preview["A"], layout["A"])
+        self.assertEqual(preview, ways.snap_screen_layout(preview, "B", "b2", 4))
+        self.assertEqual(preview, ways.snap_screen_layout(preview, "B", "b2", 0))
+
     def test_a_b_a_with_b_below_has_four_cards_and_only_real_screen_seams(self):
         layout = mixed_layout()
         before = copy.deepcopy(layout)

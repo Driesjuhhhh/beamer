@@ -26,3 +26,8 @@ class ScreenCanvasTests(unittest.TestCase):
         self.assertEqual(canvas.display_layers["B"][1].sublayers()[0].string(), "PC B · Screen 2")
         self.assertEqual(len(canvas.contact_layers), 2)
         self.assertEqual(canvas._third_segments(canvas._map()[0]), [])
+        a1, a2 = [layer.frame() for layer in canvas.display_layers["A"]]
+        b1, b2 = [layer.frame() for layer in canvas.display_layers["B"]]
+        self.assertAlmostEqual(a1.origin.x+a1.size.width, b1.origin.x)
+        self.assertAlmostEqual(b1.origin.x+b1.size.width, a2.origin.x)
+        self.assertAlmostEqual(b1.origin.y+b1.size.height, b2.origin.y)

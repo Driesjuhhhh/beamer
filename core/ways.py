@@ -321,26 +321,51 @@ def screen_scene(layout):
 
 
 def snap_screen_position(screen, targets, radius):
-    """A small edge magnet, preserving the position along the touching edge.
-
-    Screen placement has no thirds, centre preference or distant fallback.
-    """
-    candidates = [dict(screen)]
+    """Light edge snapping, with flush alignment only inside the same small radius."""
+    targets = list(targets)
+    candidates = []
     x, y, w, h = (screen[key] for key in ("x", "y", "w", "h"))
+    def add(cx, cy, aligned=False):
+        if abs(cx-x) <= radius and abs(cy-y) <= radius:
+            candidate = {**screen, "x": cx, "y": cy}
+            if not any(_overlaps(candidate, target) for target in targets):
+                candidates.append((candidate, aligned))
     for target in targets:
         tx, ty, tw, th = (target[key] for key in ("x", "y", "w", "h"))
-        if min(y+h, ty+th) > max(y, ty):
+        if min(y+h, ty+th)+radius > max(y, ty):
             for cx in (tx-w, tx+tw):
                 if abs(cx-x) <= radius:
-                    candidates.append({**screen, "x": cx})
-        if min(x+w, tx+tw) > max(x, tx):
+                    if min(y+h, ty+th) > max(y, ty):
+                        add(cx, y)
+                    for cy in (ty, ty+th-h):
+                        add(cx, cy, aligned=True)
+        if min(x+w, tx+tw)+radius > max(x, tx):
             for cy in (ty-h, ty+th):
                 if abs(cy-y) <= radius:
-                    candidates.append({**screen, "y": cy})
-    free = [candidate for candidate in candidates[1:]
-            if not any(_overlaps(candidate, target) for target in targets)]
-    return min(free, key=lambda candidate: abs(candidate["x"]-x)+abs(candidate["y"]-y),
-               default=dict(screen))
+                    if min(x+w, tx+tw) > max(x, tx):
+                        add(x, cy)
+                    for cx in (tx, tx+tw-w):
+                        add(cx, cy, aligned=True)
+    # Prefer a flush edge within four pixels, even if the normal edge already
+    # touches. Away from that small range, preserve the tangential position.
+    return min(candidates, key=lambda item: (not item[1],
+                                           abs(item[0]["x"]-x)+abs(item[0]["y"]-y)),
+               default=(dict(screen), False))[0]
+
+
+def snap_screen_layout(layout, machine, display, radius):
+    """Apply the same screen snap for the live preview and the persisted drop."""
+    result = copy.deepcopy(layout)
+    tile = result[machine]
+    screen = next(frame for frame in _display_frames(tile) if frame["display"] == display)
+    targets = [frame for peer, other in result.items() for frame in _display_frames(other)
+               if peer != machine or frame["display"] != display]
+    snapped = snap_screen_position(screen, targets, radius)
+    offsets = tile.setdefault("display_offsets", {})
+    offset = offsets.get(display, {"x": 0, "y": 0})
+    offsets[display] = {"x": offset["x"] + round(snapped["x"]-screen["x"]),
+                        "y": offset["y"] + round(snapped["y"]-screen["y"])}
+    return result
 
 
 def snap_position(tile, own_id, layout, radius=12):

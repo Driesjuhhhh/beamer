@@ -982,7 +982,7 @@ class AtlasCanvas(QWidget):
             selected = self.selected_display == (peer, display)
             painter.setBrush(_colour("well" if peer == self._own_id() else "panel"))
             painter.setPen(QPen(_colour("ink_2" if selected else "edge"), 2 if selected else 1))
-            painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 4, 4)
+            painter.drawRoundedRect(rect.adjusted(.5, .5, -.5, -.5), 4, 4)
             title = f"{self.labels.get(peer, 'Machine')} · Screen {card['number']}"
             painter.setFont(theme.font(tokens.TYPE["body"], 650))
             painter.setPen(_colour("ink"))
@@ -1090,6 +1090,10 @@ class AtlasCanvas(QWidget):
                     "y": round(self._display_offset_start["y"] + delta.y()/self._scale),
                 }
                 self.tiles[self._drag] = {**tile, "display_offsets": offsets}
+                active = {peer: item for peer, item in self.tiles.items() if peer not in self.shelf_ids}
+                snapped = ways.snap_screen_layout(active, self._drag, self._drag_display,
+                                                  ways.SCREEN_SNAP_PX / max(self._scale, .001))
+                self.tiles[self._drag] = snapped[self._drag]
                 self._dragged_display = self._dragged_display or not delta.isNull()
             else:
                 tile = self.tiles[self._drag]
