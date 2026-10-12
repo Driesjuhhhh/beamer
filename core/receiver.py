@@ -1162,7 +1162,8 @@ class LinkResponder:
         display_map = getattr(desktop, "display_map", lambda: {})()
         monitors, pointer = desktop.monitors(), desktop.cursor_position()
         for peer, model in self._armed:
-            outcome = model.feed(monitors, pointer, float(read["dx"]), float(read["dy"]), display_map=display_map)
+            outcome = model.feed(monitors, pointer, float(read["dx"]), float(read["dy"]),
+                                 display_map=display_map, project_motion=True)
             if outcome.action == crossing.PASS:
                 continue
             part = None

@@ -1,6 +1,8 @@
 import unittest
 import os
 import sys
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -60,6 +62,61 @@ class GeometryTests(unittest.TestCase):
 
 
 class PressureTests(unittest.TestCase):
+    def test_responder_holds_a_move_before_injection_on_either_portrait_segment(self):
+        from core import receiver
+        portrait = Rect(0, 0, 1080, 2560)
+        landscape = Rect(1080, 789, 1920, 1080)
+        for y in (1100, 1600):
+            with self.subTest(y=y):
+                desktop = SimpleNamespace(display_map=lambda: {'1': portrait, '0': landscape},
+                                          monitors=lambda: [portrait, landscape],
+                                          cursor_position=lambda: (1060, y), set_cursor_position=Mock())
+                armed = [(name, ReturnEdge('right', resistance_px=120, display='1', segment=segment,
+                                          target_display=name))
+                         for name, segment in [('lower', (.52, 1)), ('upper', (0, .52))]]
+                responder = SimpleNamespace(_armed=armed, edges_held=lambda: False,
+                                            _desktop_module=lambda: desktop)
+                after = []
+                self.assertTrue(receiver.LinkResponder._zones_locked(responder, Mock(),
+                                                                     {'dx': 40, 'dy': 8}, after))
+                desktop.set_cursor_position.assert_called_once_with(1079, y + 8)
+                self.assertEqual(len(after), 1)
+
+    def test_driven_move_cannot_skip_portrait_edge_into_native_neighbor(self):
+        portrait = Rect(0, 0, 1080, 2560)
+        landscape = Rect(1080, 789, 1920, 1080)
+        displays = {'1': portrait, '0': landscape}
+        for y, segment, destination in ((1100, (0, .52), 'upper'),
+                                         (1600, (.52, 1), 'lower')):
+            with self.subTest(destination=destination):
+                edge = ReturnEdge('right', resistance_px=30, clock=FakeClock(), display='1',
+                                  segment=segment, target_segment=(0, 1), target_display=destination)
+                result = edge.feed(list(displays.values()), (1060, y), 40, 8,
+                                   display_map=displays, project_motion=True)
+                self.assertEqual(result.action, HOLD)
+                self.assertEqual(result.position, (1079, y + 8))
+                self.assertAlmostEqual(result.pressure, 21 / 30)
+                result = edge.feed(list(displays.values()), result.position, 10, 0,
+                                   display_map=displays, project_motion=True)
+                self.assertEqual(result.action, CROSS)
+                self.assertEqual(result.display, destination)
+                self.assertAlmostEqual(result.offset, ((y + 8) / 2560 - segment[0]) /
+                                       (segment[1] - segment[0]))
+
+    def test_driven_interception_uses_the_segment_at_the_boundary_hit(self):
+        portrait = Rect(0, 0, 1080, 2560)
+        displays = {'1': portrait}
+        upper = ReturnEdge('right', resistance_px=1, display='1', segment=(0, .52),
+                           target_display='upper')
+        lower = ReturnEdge('right', resistance_px=1, display='1', segment=(.52, 1),
+                           target_display='lower')
+        # The diagonal move reaches the edge below the split, although it
+        # starts above it. The upper zone must leave it for the lower zone.
+        self.assertEqual(upper.feed([portrait], (1060, 1320), 40, 40,
+                                   display_map=displays, project_motion=True).action, PASS)
+        self.assertEqual(lower.feed([portrait], (1060, 1320), 40, 40,
+                                   display_map=displays, project_motion=True).display, 'lower')
+
     def test_a_zone_on_another_display_cannot_trigger_from_the_neighbor(self):
         left, right = Rect(0, 0, 100, 100), Rect(100, 0, 100, 100)
         edge = ReturnEdge('right', resistance_px=1, display='left')

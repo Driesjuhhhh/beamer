@@ -300,11 +300,30 @@ class ReturnEdge:
         beyond = (x + step_x, y + step_y)
         return any(_contains(m, pointer) for m in monitors) and not any(_contains(m, beyond) for m in monitors)
 
-    def feed(self, monitors: List[Rect], pointer: Tuple[int, int], dx: float, dy: float, display_map=None) -> Outcome:
+    def feed(self, monitors: List[Rect], pointer: Tuple[int, int], dx: float, dy: float, display_map=None,
+             project_motion: bool = False) -> Outcome:
         bounds = union(monitors)
         edge_bounds = display_map.get(self.display, bounds) if self.display and isinstance(display_map, dict) else bounds
         if not isinstance(edge_bounds, Rect):
             edge_bounds = bounds
+
+        # Driven mouse moves are checked before SendInput. Without intercepting
+        # the delta, one move from inside a screen can jump past its barrier
+        # into a native neighbour, which then claims the next move's zones.
+        # Physical raw input is observed after Windows moves, so it must not
+        # project the delta a second time.
+        if project_motion and self.display and _contains(edge_bounds, pointer):
+            outward = self._outward(dx, dy)
+            distance = {"left": pointer[0] - edge_bounds.x,
+                        "right": edge_bounds.right - pointer[0],
+                        "top": pointer[1] - edge_bounds.y,
+                        "bottom": edge_bounds.bottom - pointer[1]}[self.edge]
+            if outward > 0 and distance > 1.5 and outward >= distance:
+                fraction = distance / outward
+                hit = (pointer[0] + dx * fraction, pointer[1] + dy * fraction)
+                if self._at_edge(monitors, hit, display_map):
+                    pointer = hit
+                    dx, dy = dx * (1 - fraction), dy * (1 - fraction)
 
         def held_position():
             x, y = pointer
