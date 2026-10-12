@@ -3160,6 +3160,10 @@ class ControlWindow(AppKit.NSObject):
         spacer.setContentHuggingPriority_forOrientation_(1, AppKit.NSLayoutConstraintOrientationHorizontal)
         header.addArrangedSubview_(spacer)
         self.identify_screens_button = widgets.Button("Identify screens", self, "identifyScreens:")
+        self.save_layout_button = widgets.Button("Save layout", self, "saveCrossingLayout:")
+        header.addArrangedSubview_(self.save_layout_button.view)
+        self.load_layout_button = widgets.Button("Load layout", self, "loadCrossingLayout:")
+        header.addArrangedSubview_(self.load_layout_button.view)
         header.addArrangedSubview_(self.identify_screens_button.view)
         module.add(header)
         self.atlas_canvas = diagram.AtlasCanvas.alloc().init().setup()
@@ -3199,6 +3203,36 @@ class ControlWindow(AppKit.NSObject):
         self._screen_identifier.show(tile, settings.get("name") or socket.gethostname().split(".")[0],
                                      (labels or {}).get(settings["machine_id"]))
         self.atlas_canvas.identify(labels or {settings['machine_id']: ''})
+
+    def saveCrossingLayout_(self, _sender):
+        from core import layout_files
+        panel = AppKit.NSSavePanel.savePanel()
+        panel.setNameFieldStringValue_('Crossing-layout.json')
+        if panel.runModal() != AppKit.NSModalResponseOK:
+            return
+        try:
+            self._flush()
+            layout_files.write(str(panel.URL().path()), self.settings_store.current())
+            self._say('Layout saved.', 'ink_2')
+        except (OSError, ValueError) as exc:
+            self._say(str(exc), 'fault')
+
+    def loadCrossingLayout_(self, _sender):
+        from core import layout_files
+        panel = AppKit.NSOpenPanel.openPanel()
+        panel.setAllowsMultipleSelection_(False)
+        panel.setCanChooseDirectories_(False)
+        if panel.runModal() != AppKit.NSModalResponseOK:
+            return
+        try:
+            tiles = layout_files.read(str(panel.URL().path()))
+            self._flush()
+            self.controller.crossing_event(crossing_state.restore_layout, tiles, **self._crossing_args())
+            self._load_ways()
+            self._reflect()
+            self._say('Layout loaded.', 'ink_2')
+        except (OSError, ValueError, SettingsError) as exc:
+            self._say(str(exc), 'fault')
 
     def identifyScreens_(self, _sender):
         from core import screen_identify

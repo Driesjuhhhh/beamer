@@ -44,6 +44,26 @@ def position(widget, root):
 
 
 class CrossingPageParityTests(unittest.TestCase):
+    def test_layout_save_and_load_buttons_restore_the_saved_picture(self):
+        from core import layout_files
+        path = Path(self.tempdir.name) / 'desk.json'
+        with patch.object(kvm.QFileDialog, 'getSaveFileName', return_value=(str(path), '')):
+            self.window.save_layout_button.click()
+        picture = layout_files.read(path)
+        held = app_config.load_settings(self.path)
+        for tile in held['layout'].values():
+            tile['x'] += 50
+        app_config.write_settings(self.path, held)
+        self.window._read_crossing()
+        with patch.object(kvm.QFileDialog, 'getOpenFileName', return_value=(str(path), '')), \
+                patch.object(self.window, '_send_same') as send, patch.object(self.window, '_tell'):
+            self.window.load_layout_button.click()
+        restored = app_config.load_settings(self.path)
+        for machine, tile in picture.items():
+            self.assertEqual(restored['layout'][machine]['x'], tile['x'])
+            self.assertEqual(restored['layout'][machine].get('display_sizes', {}), tile.get('display_sizes', {}))
+        send.assert_called_once_with(layout_only=True)
+
     def test_ledger_uses_individual_screen_contacts_not_group_rectangles(self):
         from core import ways
         from core.tests.test_screen_scene import mixed_layout

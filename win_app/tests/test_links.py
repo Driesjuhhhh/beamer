@@ -857,6 +857,17 @@ class MouseTests(unittest.TestCase):
         self.rig = Rig()
         self.sender = self.rig.sender
 
+    def test_fractional_trackpad_scroll_follows_shortcut_in_both_axes(self):
+        self.sender.toggle_shortcut()
+        self.rig.accept_take()
+        self.assertTrue(self.sender.on_wheel(1 / 120, -40 / 120))
+        messages = self.rig.sent(B, 'scroll')
+        self.assertEqual(len(messages), 1)
+        self.assertAlmostEqual(messages[0]['data']['dy'], 1 / 120)
+        self.assertAlmostEqual(messages[0]['data']['dx'], -40 / 120)
+        self.sender.toggle_shortcut()
+        self.assertFalse(self.sender.on_wheel(1 / 120, 0))
+
     def test_nothing_is_swallowed_or_sent_while_input_is_this_pcs(self):
         self.assertFalse(self.sender.on_button("left", True))
         self.assertFalse(self.sender.on_wheel(1.0, 0.0))

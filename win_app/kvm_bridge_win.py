@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFrame,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -1892,6 +1893,12 @@ class WindowsApplication(QWidget):
         header = QHBoxLayout()
         header.addWidget(module.eyebrow)
         header.addStretch()
+        self.save_layout_button = QPushButton("Save layout")
+        self.save_layout_button.clicked.connect(self._save_crossing_layout)
+        header.addWidget(self.save_layout_button)
+        self.load_layout_button = QPushButton("Load layout")
+        self.load_layout_button.clicked.connect(self._load_crossing_layout)
+        header.addWidget(self.load_layout_button)
         self.identify_screens_button = QPushButton("Identify screens")
         self.identify_screens_button.clicked.connect(self._identify_screens)
         header.addWidget(self.identify_screens_button)
@@ -1931,6 +1938,33 @@ class WindowsApplication(QWidget):
             "Three lit segments are the whole edge; click one to leave it out. "
             "A corner is a diagonal push, shown as a square on the map.", "note", wrap=True))
         return module
+
+    def _save_crossing_layout(self):
+        from core import layout_files
+        path, _ = QFileDialog.getSaveFileName(self, 'Save Crossing layout', 'Crossing-layout.json', 'Beamer layouts (*.json)')
+        if not path:
+            return
+        try:
+            layout_files.write(path, self._crossing_settings())
+            self.atlas_canvas.announce('Layout saved.')
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, 'Save layout failed', str(exc))
+
+    @_crossing_refresh
+    def _load_crossing_layout(self):
+        from core import layout_files
+        path, _ = QFileDialog.getOpenFileName(self, 'Load Crossing layout', '', 'Beamer layouts (*.json)')
+        if not path:
+            return
+        try:
+            tiles = layout_files.read(path)
+            with app_config.SETTINGS_LOCK:
+                settings = app_config.load_settings(self.config_path)
+                outcome = crossing_state.restore_layout(settings, tiles, **self._crossing_event_args())
+                self._carry_crossing(outcome)
+            self.atlas_canvas.announce('Layout loaded.')
+        except (OSError, ValueError, ConfigError) as exc:
+            QMessageBox.warning(self, 'Load layout failed', str(exc))
 
     def _pointer_module(self, current: Config) -> QWidget:
         module = widgets.Module("This machine's pointer", heading=True)
@@ -4216,6 +4250,11 @@ class WindowsApplication(QWidget):
         self._sending_detail = detail
 
     def _on_redirecting(self, redirecting: bool) -> None:
+        if sys.platform == 'win32':
+            from scroll_sink import ScrollSink
+            if not hasattr(self, '_scroll_sink'):
+                self._scroll_sink = ScrollSink(self.sender.on_wheel, self)
+            self._scroll_sink.set_redirecting(redirecting)
         self._sending_detail = (
             f"This PC's keyboard and mouse are on {self._label_of(self.sender.owner)}" if redirecting else self.sender.status
         )

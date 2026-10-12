@@ -145,6 +145,31 @@ def drop(settings, tiles, moved, *, platform, capable, live, gone, now, snap_rad
     return _outcome(settings, saved, result, tell=_tells(settings, saved, sides=True), send_picture=True)
 
 
+def restore_layout(settings, tiles, *, platform, capable, live, gone, now):
+    """Restore a validated picture while retaining current machine/display identities."""
+    saved = _initial(settings, capable)
+    if saved.get('machine_id') not in tiles:
+        raise ValueError('This layout does not include this PC.')
+    known = {saved['machine_id']} | {p.get('id') for p in saved.get('peers', [])}
+    for machine, tile in tiles.items():
+        if machine not in known:
+            continue
+        restored = copy.deepcopy(tile)
+        current = saved['layout'].get(machine, {})
+        if current.get('displays'):
+            restored['displays'] = copy.deepcopy(current['displays'])
+            for key in ('display_offsets', 'display_sizes'):
+                restored[key] = {screen: value for screen, value in restored.get(key, {}).items()
+                                 if screen in restored['displays']}
+        saved['layout'][machine] = restored
+    _stamp(saved, now)
+    result = _compile(saved, platform, capable=capable, live=live, gone=gone, now=now)
+    if not result['accepted']:
+        raise ValueError('These screen positions overlap or cannot be connected.')
+    return _outcome(settings, result['settings'], result,
+                    tell=_tells(settings, result['settings'], sides=True), send_picture=True)
+
+
 def edit_ways(settings, peer, *, platform, edge=None, thirds=None, corner=None,
               corner_at=None, notch=None, live, gone, now, capable=()):
     """Update only specified choices; an empty third selection keeps the last choice."""
