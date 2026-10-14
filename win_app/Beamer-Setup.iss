@@ -2,9 +2,14 @@
 ; Built by build_win_app.ps1 -Release. The version is read from the repo-root VERSION file, the one
 ; place it is set for both apps.
 
+#ifndef AppVersion
 #define VersionFile FileOpen(AddBackslash(SourcePath) + "..\VERSION")
 #define AppVersion Trim(FileRead(VersionFile))
 #expr FileClose(VersionFile)
+#endif
+#ifndef AppExePath
+#define AppExePath "dist\Beamer.exe"
+#endif
 ; A beta such as 1.5.0-beta.1 names itself in the shown version, but the file version resource
 ; takes four integers, so it carries the release number.
 #define NumericVersion Copy(AppVersion, 1, Pos("-", AppVersion + "-") - 1)
@@ -42,7 +47,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "autostart"; Description: "Start Beamer elevated at sign-in without another UAC prompt"; GroupDescription: "Startup options:"; Flags: unchecked
 
 [Files]
-Source: "dist\Beamer.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#AppExePath}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; The same paths Install-Beamer.ps1 writes, so either installer replaces the other's shortcuts
@@ -69,6 +74,16 @@ Filename: "{app}\Beamer.exe"; Description: "{cm:LaunchProgram,Beamer}"; Flags: n
 Filename: "{app}\Beamer.exe"; Parameters: "--uninstall-cleanup"; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "BeamerCleanup"
 
 [Code]
+var
+  HadLegacyAutostart: Boolean;
+
+function InitializeSetup(): Boolean;
+begin
+  HadLegacyAutostart := FileExists(ExpandConstant('{userstartup}\Beamer.lnk')) or
+    RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Beamer');
+  Result := True;
+end;
+
 function RunTaskOperation(const Filename, Params: String; var ResultCode: Integer): Boolean;
 begin
   if IsAdmin then
@@ -88,8 +103,8 @@ begin
   Result := Action + ' ' + Result;
 end;
 
-// Keep the old elevated starter until first run migrates it successfully. This also preserves
-// autostart when a silent upgrade does not launch Beamer after replacing the executable.
+// Repair enabled scheduled tasks even if they refer to an old portable copy.
+// Disabled starters stay disabled; legacy shortcuts/Run entries retain their enabled choice.
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
@@ -97,9 +112,12 @@ var
   Started: Boolean;
   Failure: String;
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('autostart') then
+  if CurStep = ssPostInstall then
   begin
-    Started := RunTaskOperation(ExpandConstant('{app}\Beamer.exe'), '--enable-autostart', ResultCode);
+    if WizardIsTaskSelected('autostart') or HadLegacyAutostart then
+      Started := RunTaskOperation(ExpandConstant('{app}\Beamer.exe'), '--enable-autostart', ResultCode)
+    else
+      Started := RunTaskOperation(ExpandConstant('{app}\Beamer.exe'), '--repair-autostart', ResultCode);
     if (not Started) or (ResultCode <> 0) then
     begin
       Failure := TaskCommandFailure('Could not run Beamer sign-in setup.', Started, ResultCode);

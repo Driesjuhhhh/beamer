@@ -208,8 +208,36 @@ def _user_sid(user: str) -> str:
     return win32security.ConvertSidToStringSid(sid)
 
 
+def repair_after_upgrade(exe: str, user: Optional[str] = None, run: Runner = _run) -> None:
+    """Retarget this user's enabled starter, even when it points to an older copy."""
+    user = user or current_user()
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    current = _task_root(task_name(user), run)
+    legacy = _task_root('Beamer', run)
+    legacy_owned = False
+    if legacy is not None:
+        owner = legacy.findtext('t:Principals/t:Principal/t:UserId', '', ns)
+        legacy_owned = owner.casefold() == user.casefold()
+        if not legacy_owned:
+            try:
+                legacy_owned = owner.casefold() == _user_sid(user).casefold()
+            except OSError:
+                pass
+
+    def enabled(root):
+        return (root is not None and root.findtext('t:Settings/t:Enabled', 'true', ns).lower() == 'true'
+                and any(trigger.findtext('t:Enabled', 'true', ns).lower() == 'true'
+                        for trigger in root.findall('t:Triggers/t:LogonTrigger', ns)))
+
+    if enabled(current) or legacy_owned and enabled(legacy):
+        if not _replacement_ready(current, exe, '--hidden'):
+            set_enabled(True, exe, user, run, cleanup_legacy=legacy_owned)
+        elif legacy_owned:
+            remove_legacy_task(run, disable_first=True)
+
+
 def set_enabled(enabled: bool, exe: str, user: Optional[str] = None, run: Runner = _run,
-                *, arguments: str = "--hidden") -> None:
+                *, arguments: str = "--hidden", cleanup_legacy: bool = True) -> None:
     """Raises OSError with schtasks' own words when Windows refuses."""
     user = user or current_user()
     name = task_name(user)
@@ -230,7 +258,7 @@ def set_enabled(enabled: bool, exe: str, user: Optional[str] = None, run: Runner
             os.unlink(path)
     if result.returncode != 0:
         raise OSError((result.stderr or result.stdout or "schtasks failed").strip())
-    if enabled:
+    if enabled and cleanup_legacy:
         remove_legacy_task(run, disable_first=True)
 
 

@@ -4787,12 +4787,26 @@ def cleanup_for_uninstall() -> int:
     return int(failed)
 
 
+def repair_autostart_for_setup() -> int:
+    try:
+        exe = autostart_win.installed_exe()
+        if exe is None:
+            raise OSError('Only the installed Beamer app can update start at sign-in')
+        autostart_win.repair_after_upgrade(exe)
+    except OSError as exc:
+        LOGGER.warning('Could not update start at sign-in from setup: %s', exc)
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
     # Before the single-instance lock, so a Beamer already running does not turn the probe away.
     if sys.argv[1:2] == ["--import-probe"]:
         sys.exit(import_probe(sys.argv[2], sys.argv[3:]))
     if sys.argv[1:2] == ["--enable-autostart"]:
         sys.exit(register_autostart_for_setup())
+    if sys.argv[1:2] == ["--repair-autostart"]:
+        sys.exit(repair_autostart_for_setup())
     if sys.argv[1:2] == ["--uninstall-cleanup"]:
         sys.exit(cleanup_for_uninstall())
     main()

@@ -40,6 +40,49 @@ class UpgradeTasks(FakeSchtasks):
 
 
 class UpgradeAutostartTests(unittest.TestCase):
+    def test_installer_retargets_enabled_per_user_task_from_old_portable_copy(self):
+        tasks = UpgradeTasks(exists=False)
+        tasks.tasks.add(autostart_win.task_name(USER))
+        new_exe = r'C:\Users\alex\AppData\Local\Beamer\Updated\Beamer.exe'
+        autostart_win.repair_after_upgrade(new_exe, USER, tasks)
+        root = ET.fromstring(tasks.xml)
+        ns = {'t': 'http://schemas.microsoft.com/windows/2004/02/mit/task'}
+        self.assertEqual(root.findtext('t:Actions/t:Exec/t:Command', '', ns), new_exe)
+        self.assertEqual(root.findtext('t:Actions/t:Exec/t:Arguments', '', ns), '--hidden')
+        self.assertEqual(tasks.tasks, {autostart_win.task_name(USER)})
+        tasks.calls.clear()
+        autostart_win.repair_after_upgrade(new_exe, USER, tasks)
+        self.assertNotIn('/create', tasks.calls)
+
+    def test_installer_migrates_enabled_legacy_task_even_when_its_path_is_old(self):
+        tasks = UpgradeTasks()
+        new_exe = r'C:\Updated\Beamer.exe'
+        autostart_win.repair_after_upgrade(new_exe, USER, tasks)
+        self.assertIn(new_exe, tasks.xml)
+        self.assertEqual(tasks.tasks, {autostart_win.task_name(USER)})
+        self.assertLess(tasks.calls.index('/create'), tasks.calls.index('/delete'))
+
+    def test_installer_keeps_disabled_or_absent_startup_disabled(self):
+        for exists in (False, True):
+            tasks = UpgradeTasks(exists=exists, enabled=False)
+            autostart_win.repair_after_upgrade(r'C:\Updated\Beamer.exe', USER, tasks)
+            self.assertNotIn('/create', tasks.calls)
+
+    def test_installer_does_not_delete_other_accounts_legacy_task(self):
+        tasks = UpgradeTasks(owner=r'SYNTHETIC\other')
+        tasks.tasks.add(autostart_win.task_name(USER))
+        tasks.replacement_xml = autostart_win.task_xml(EXE, USER)
+        autostart_win.repair_after_upgrade(r'C:\Updated\Beamer.exe', USER, tasks)
+        self.assertIn('Beamer', tasks.tasks)
+        self.assertNotIn('/delete', tasks.calls)
+
+    def test_failed_installer_retarget_keeps_the_old_starter(self):
+        tasks = UpgradeTasks(fail='Access is denied')
+        with self.assertRaises(OSError):
+            autostart_win.repair_after_upgrade(r'C:\Updated\Beamer.exe', USER, tasks)
+        self.assertEqual(tasks.tasks, {'Beamer'})
+        self.assertNotIn('/delete', tasks.calls)
+
     def setUp(self):
         for name, value in (("installed_exe", EXE), ("can_run_for_current_user", True)):
             patcher = patch.object(autostart_win, name, return_value=value)
