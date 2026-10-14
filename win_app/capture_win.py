@@ -59,6 +59,7 @@ user32 = ctypes.WinDLL("user32", use_last_error=True) if _IS_WINDOWS else None
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True) if _IS_WINDOWS else None
 
 WM_INPUT = 0x00FF
+WM_REFRESH_KEYBOARD = 0x8001
 RID_INPUT = 0x10000003
 RIDEV_INPUTSINK = 0x00000100
 RIM_TYPEMOUSE = 0
@@ -566,6 +567,24 @@ class Hooks:
         self._thread = None
         self._thread_id = None
 
+    def refresh_keyboard(self) -> None:
+        """Ask the owning thread to repair a hook Windows may have silently removed."""
+        if self._thread_id is not None:
+            if not user32.PostThreadMessageW(self._thread_id, WM_REFRESH_KEYBOARD, 0, 0):
+                LOGGER.warning('Could not request keyboard capture refresh')
+
+    def _refresh_keyboard(self) -> None:
+        if not self._handles or not self._callbacks:
+            return
+        # Install first: if registration fails the old hook is still usable.
+        handle = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._callbacks[0], None, 0)
+        if not handle:
+            LOGGER.error('Could not refresh keyboard capture: %s', ctypes.WinError(ctypes.get_last_error()))
+            return
+        previous, self._handles[0] = self._handles[0], handle
+        user32.UnhookWindowsHookEx(previous)
+        LOGGER.info('Keyboard capture refreshed for input handover')
+
     def _run(self) -> None:
         keyboard = _LL_HOOK_PROC(self._keyboard_proc)
         mouse = _LL_HOOK_PROC(self._mouse_proc)
@@ -595,6 +614,9 @@ class Hooks:
             self._ready.set()
             message = MSG()
             while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+                if message.message == WM_REFRESH_KEYBOARD:
+                    self._refresh_keyboard()
+                    continue
                 user32.TranslateMessage(ctypes.byref(message))
                 user32.DispatchMessageW(ctypes.byref(message))
         except Exception as exc:

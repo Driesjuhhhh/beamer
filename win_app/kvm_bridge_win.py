@@ -4289,6 +4289,8 @@ class WindowsApplication(QWidget):
 
     def _on_redirecting(self, redirecting: bool) -> None:
         if sys.platform == 'win32':
+            if redirecting and hasattr(self, 'hooks'):
+                self.hooks.refresh_keyboard()
             from scroll_sink import ScrollSink
             if not hasattr(self, '_scroll_sink'):
                 self._scroll_sink = ScrollSink(self.sender.on_wheel, self)

@@ -54,9 +54,10 @@ class ScrollSinkTests(unittest.TestCase):
     def test_redirect_signal_activates_capture_and_return_signal_releases_it(self):
         from kvm_bridge_win import WindowsApplication
         window = SimpleNamespace(sender=SimpleNamespace(on_wheel=Mock(), owner='peer', status='Local'),
-                                 _label_of=lambda _: 'Other PC', _refresh_tray_state=Mock())
+                                 _label_of=lambda _: 'Other PC', _refresh_tray_state=Mock(), hooks=Mock())
         with patch('scroll_sink.ScrollSink') as factory:
             WindowsApplication._on_redirecting(window, True)
+            window.hooks.refresh_keyboard.assert_called_once_with()
             factory.assert_called_once_with(window.sender.on_wheel, window)
             factory.return_value.set_redirecting.assert_called_with(True)
             WindowsApplication._on_redirecting(window, False)
