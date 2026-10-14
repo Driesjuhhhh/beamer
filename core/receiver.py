@@ -593,6 +593,7 @@ class LinkResponder:
         thread.start()
 
     def stop(self) -> None:
+        self.release_follow_keyboards()
         with self._lock:
             self._requested_running = False
             stop_event, listener, thread = self._stop_event, self._listener, self._thread
@@ -872,6 +873,7 @@ class LinkResponder:
                 current = self._links.get(link.peer_id) is link
                 if current:
                     del self._links[link.peer_id]
+                    self.release_follow_keyboards(protocol.id_text(link.peer_id))
                 after = self._end_locked(link)
             link.close()
             self._run(after)
@@ -968,6 +970,44 @@ class LinkResponder:
             link.post(protocol.ping_msg(echo=read["probe"]))
 
     # Input (sections 3, 4 and 10)
+
+    def follow_keyboard(self, peer, read):
+        """Inject an authenticated keyboard follower without taking pointer ownership."""
+        from types import SimpleNamespace
+        if read.get('type') not in (protocol.MSG_KEYDOWN, protocol.MSG_KEYUP, protocol.MSG_TEXT):
+            return
+        entry = next((p for p in self._settings_now()[0] if p.get('id') == peer), None)
+        if entry is None or entry.get('allow_drive') is not True or entry.get('in_use', True) is False:
+            return
+        with self._lock:
+            if self._unlocking.is_set():
+                return
+            if self._unlock is not None and self._unlock.is_locked() is True:
+                return
+            if not hasattr(self, '_keyboard_followers'):
+                self._keyboard_followers = {}
+            follower = self._keyboard_followers.setdefault(peer, SimpleNamespace(held={}))
+            self._inject_locked(follower, read)
+
+    def release_follow_keyboards(self, peer=None):
+        with self._lock:
+            followers = getattr(self, '_keyboard_followers', {})
+            names = list(followers) if peer is None else [peer]
+            for name in names:
+                follower = followers.pop(name, None)
+                if follower is None:
+                    continue
+                for (_kind, key), us in list(follower.held.items()):
+                    if not self._key_held_elsewhere(follower, key):
+                        self._injector_module().inject_key(key, down=False, us=us)
+            self._keyboard_followers = followers
+
+    def _key_held_elsewhere(self, source, key):
+        owner = self._owner
+        others = list(getattr(self, '_keyboard_followers', {}).values())
+        if owner is not None:
+            others.append(owner)
+        return any(other is not source and ('key', key) in other.held for other in others)
 
     def _on_input(self, link: _Link, message) -> None:
         read = protocol.read_input(message)
@@ -1073,7 +1113,8 @@ class LinkResponder:
                 link.held[("key", read["key"])] = read["us"]
             else:
                 link.held.pop(("key", read["key"]), None)
-            injector.inject_key(read["key"], down=down, us=read["us"])
+            if down or not self._key_held_elsewhere(link, read['key']):
+                injector.inject_key(read["key"], down=down, us=read["us"])
         elif kind == protocol.MSG_MOUSEMOVE:
             dx, dy = read["dx"], read["dy"]
             if self.input_scale is not None and (dx or dy):
@@ -1391,6 +1432,11 @@ class LinkResponder:
             self._generation += 1
         peers, _ = self._settings_now()
         by_key_id = {}
+        allowed_followers = {peer.get('id') for peer in peers
+                             if peer.get('allow_drive') is True and peer.get('in_use', True)}
+        for peer in list(getattr(self, '_keyboard_followers', {})):
+            if peer not in allowed_followers:
+                self.release_follow_keyboards(peer)
         for peer in peers:
             found = _entry_key_id(peer)
             if found is not None:

@@ -94,6 +94,9 @@ edge magnet. Top, bottom and side edges align flush only within that same small 
 elsewhere the position along the edge is preserved, without jumping to a centre or a third. Crossing follows
 their touching borders. These positions configure Beamer; they do not change Windows' display settings.
 Machines that have not reported their displays show a single placeholder until screen information arrives.
+When both Windows PCs run this build, a keyboard attached to another PC follows the active pointer
+destination. Its switch key asks the pointer's PC to switch, without starting a competing mouse
+handover. This shared focus requires updated Windows peers; existing Mac peers retain their usual input routing.
 Once screen information is available, both desktop apps use the same screen-only map: no
 machine-size outlines, thirds grid or old corner overlays. For example, two screens belonging
 to PC A and two to PC B can be arranged as A–B–A with the second B below the middle screen;

@@ -480,6 +480,9 @@ class LinkSender:
 
     def on_dead_key(self, vk: Optional[int] = None) -> bool:
         """Swallow a dead key only while its live peer owns this PC's input."""
+        followed = getattr(self, 'keyboard_is_away', None)
+        if followed is not None and followed():
+            return vk is None or not self._ignore_gate.keeps(ignored.key(vk), True)
         owner = self._owner
         if owner is None or not owner.away:
             return False
@@ -578,6 +581,11 @@ class LinkSender:
 
     def on_text(self, text: str, vk: Optional[int] = None) -> bool:
         """Sends a composed key sequence as text when this PC's input is away."""
+        follow = getattr(self, 'keyboard_follow', None)
+        if follow is not None:
+            routed = follow(protocol.text_msg(text))
+            if routed is not None:
+                return routed
         owner = self._owner
         if owner is None:
             return False
@@ -677,6 +685,11 @@ class LinkSender:
     def _input(self, message: dict) -> bool:
         """Gives the owner one input event and carries out what it answers; True when this PC
         must not act on the event."""
+        follow = getattr(self, 'keyboard_follow', None)
+        if follow is not None:
+            routed = follow(message)
+            if routed is not None:
+                return routed
         with self._lock:
             actions = self._owner.input(message)
             self._queue(actions)

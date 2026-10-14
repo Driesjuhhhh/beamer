@@ -310,6 +310,8 @@ class StatusBridge(QObject):
     # The other direction: this PC's own input going to the Mac.
     sending = Signal(bool, str)
     redirecting = Signal(bool)
+    shared_focus = Signal(object)
+    shared_release = Signal()
     # A peer began or stopped driving this PC: its id as base64, "" when none does.
     owner = Signal(str)
     # A link learnt something about a peer and saved it, or came up or went down.
@@ -644,7 +646,15 @@ class WindowsApplication(QWidget):
         self.server.edges_held = lambda: self.sender.edges_held
         self.sender.on_alert = self.bridge.alert.emit
         self.bridge.alert.connect(self._on_alert)
-        hook_callbacks = (self._on_hook_key, self._on_hook_mouse, self.sender.on_motion)
+        from core.shared_input import SharedInput
+        self._shared_peers = set()
+        self.bridge.shared_release.connect(self.server.release_follow_keyboards)
+        self._shared_input = SharedInput('', self._send_shared_input,
+                                         self.bridge.shared_focus.emit, self.bridge.shared_release.emit)
+        self.sender.keyboard_follow = self._shared_input.route_keyboard
+        self.sender.keyboard_is_away = lambda: self._shared_input.keyboard_away
+        self.bridge.shared_focus.connect(self._broadcast_shared_focus)
+        hook_callbacks = (self._on_hook_key, self._on_hook_mouse, self._on_hook_motion)
         if sys.platform.startswith("win"):
             self.hooks = capture_win.Hooks(*hook_callbacks, on_seam=self.sender.seam_clip_position)
         else:
@@ -682,6 +692,7 @@ class WindowsApplication(QWidget):
         try:
             # With nothing paired the window still has this PC's own settings to show and keep.
             self._config = load_config(config_path, unpaired_ok=True)
+            self._shared_input.own = self._config.machine_id
             self._same_seen = self._same_fields()
             self._design_seen = self._design_fields()
             self._apply_input_scale(self._config)
@@ -1580,7 +1591,7 @@ class WindowsApplication(QWidget):
         entry = next((item for item in peers if protocol.read_id(item.get("id")) == peer), None)
         if entry is None:
             return []
-        messages = []
+        messages = [protocol.settings_msg({'shared_input': True, 'session': self._shared_input.session})] if hasattr(self, '_shared_input') else []
         author = protocol.read_id(entry.get("side_by")) or protocol.read_id(self._config.machine_id)
         if (entry["id"] in outcome["tell"] or entry["id"] in self._layout_capable()) and author is not None:
             messages.append(protocol.arrangement_v6(
@@ -1655,6 +1666,41 @@ class WindowsApplication(QWidget):
         that takes it, which stops the first time it meets a copy it already holds."""
         if self._config is None or any(entry.get("id") == peer and entry.get("port") == 0 for entry in self.book.peers()):
             return
+        if isinstance(data, dict) and hasattr(self, '_shared_input'):
+            known = {self._config.machine_id} | {p.get('id') for p in self.book.peers() if p.get('in_use', True)}
+            if data.get('shared_input') is True:
+                if peer not in known:
+                    return
+                if not self._shared_input.hello(peer, data.get('session')):
+                    return
+                self._shared_peers.add(peer)
+                state = self._shared_input.state
+                if state and state['driver'] == self._config.machine_id:
+                    self._send_shared_input(peer, {'shared_focus': dict(state)})
+                return
+            if 'shared_focus' in data:
+                if peer in self._shared_peers:
+                    if self._shared_input.accept_focus(peer, data['shared_focus'], known):
+                        LOGGER.info('Shared input follows %s; pointer source is %s',
+                                    self._label_of(protocol.read_id(data['shared_focus']['target'])),
+                                    self._label_of(protocol.read_id(peer)))
+                return
+            if 'shared_keyboard' in data:
+                if peer in self._shared_peers:
+                    self._shared_input.deliver_keyboard(peer, data['shared_keyboard'], known,
+                                                        lambda read: self.server.follow_keyboard(peer, read))
+                return
+            if 'shared_shortcut' in data:
+                request = data['shared_shortcut']
+                state = self._shared_input.state
+                if (peer in self._shared_peers and peer in known and isinstance(request, dict) and state
+                        and state['driver'] == self._config.machine_id and request.get('focus') == state):
+                    action = request.get('action')
+                    if action == capture_win.TOGGLE:
+                        self.sender.toggle_shortcut()
+                    elif action in (capture_win.REDIRECT, capture_win.RETURN):
+                        self.sender.hold_shortcut(action == capture_win.REDIRECT)
+                return
         if isinstance(data, dict) and data.get("identify_screens") is True:
             self._handle_identify(data, protocol.read_id(peer))
             return
@@ -4229,6 +4275,8 @@ class WindowsApplication(QWidget):
             return self.sender.on_key(name, down, vk, us)
         action = self._trigger.feed(name, down, time.monotonic())
         if action is not None:
+            if hasattr(self, '_shared_input') and self._shared_input.shortcut(action):
+                return True
             if action == capture_win.TOGGLE:
                 self.sender.toggle_shortcut()
             else:
@@ -4237,6 +4285,23 @@ class WindowsApplication(QWidget):
         if self._trigger.claims(name, down, self.sender.redirecting):
             return True
         return self.sender.on_key(name, down, vk, us)
+
+    def _send_shared_input(self, peer, data):
+        if peer not in self._shared_peers:
+            return False
+        return self._send_to(protocol.read_id(peer), protocol.settings_msg(data))
+
+    def _broadcast_shared_focus(self, data):
+        LOGGER.info('Shared input follows %s; this PC owns the physical pointer',
+                    self._label_of(protocol.read_id(data['shared_focus']['target'])))
+        for peer in list(self._shared_peers):
+            self._send_shared_input(peer, data)
+
+    def _on_hook_motion(self, dx, dy):
+        if dx or dy:
+            target = self.sender.owner
+            self._shared_input.claim_pointer(protocol.id_text(target) if target else self._config.machine_id)
+        self.sender.on_motion(dx, dy)
 
     def _store_paired(self, peer: bytes, ids: list) -> None:
         """The machines a peer says it is paired with, for the Crossing page, on the link's thread."""
@@ -4282,12 +4347,21 @@ class WindowsApplication(QWidget):
             return
         self._pull_peer_fields()
         self.sender.refresh()
+        if hasattr(self, '_shared_input'):
+            connected = {protocol.id_text(peer) for peer in self._peer_caps()}
+            self._shared_peers.intersection_update(connected)
+            state = self._shared_input.state
+            if state and state['driver'] != self._config.machine_id and state['driver'] not in connected:
+                self._shared_input.claim_pointer(self._config.machine_id)
         self._refresh_peers()
 
     def _on_sending(self, connected: bool, detail: str) -> None:
         self._sending_detail = detail
 
     def _on_redirecting(self, redirecting: bool) -> None:
+        if hasattr(self, '_shared_input'):
+            target = self.sender.owner
+            self._shared_input.move_pointer(protocol.id_text(target) if target else self._config.machine_id)
         if sys.platform == 'win32':
             if redirecting and hasattr(self, 'hooks'):
                 self.hooks.refresh_keyboard()
