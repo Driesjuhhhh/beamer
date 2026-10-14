@@ -1849,6 +1849,7 @@ class ControlWindow(AppKit.NSObject):
         self._load_ways()
         self._reflect()
         if moved in outcome["settings"]["layout"]:
+            self.layout_choice.value = ''
             tile_state = dict(outcome["tiles"].get(moved, {}))
             tile_state["crosses"] = core_ways.crosses_on_map(self.settings_store.current(), moved)
             self.atlas_canvas.announce_move(moved, outcome["settings"]["layout"][moved], tile_state)
@@ -3162,10 +3163,14 @@ class ControlWindow(AppKit.NSObject):
         self.identify_screens_button = widgets.Button("Identify screens", self, "identifyScreens:")
         self.save_layout_button = widgets.Button("Save layout", self, "saveCrossingLayout:")
         header.addArrangedSubview_(self.save_layout_button.view)
-        self.load_layout_button = widgets.Button("Load layout", self, "loadCrossingLayout:")
+        self.load_layout_button = widgets.Button("Import layout", self, "loadCrossingLayout:")
         header.addArrangedSubview_(self.load_layout_button.view)
         header.addArrangedSubview_(self.identify_screens_button.view)
         module.add(header)
+        self.layout_choice = widgets.MenuChoice([('', 'Choose a saved layout…')], self._choose_saved_layout)
+        self.layout_choice.popup.setAccessibilityLabel_('Saved Crossing layouts')
+        module.add(self.layout_choice.view)
+        self._reload_layout_choices()
         self.atlas_canvas = diagram.AtlasCanvas.alloc().init().setup()
         self.arrangement_diagram = self.atlas_canvas
         self.atlas_canvas.on_layout_change = self._atlas_layout_changed
@@ -3206,15 +3211,48 @@ class ControlWindow(AppKit.NSObject):
 
     def saveCrossingLayout_(self, _sender):
         from core import layout_files
-        panel = AppKit.NSSavePanel.savePanel()
-        panel.setNameFieldStringValue_('Crossing-layout.json')
-        if panel.runModal() != AppKit.NSModalResponseOK:
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_('Save Crossing layout')
+        alert.setInformativeText_('Choose a name. An existing name replaces that layout.')
+        alert.addButtonWithTitle_('Save')
+        alert.addButtonWithTitle_('Cancel')
+        field = AppKit.NSTextField.alloc().initWithFrame_(((0, 0), (340, 24)))
+        alert.setAccessoryView_(field)
+        alert.window().setInitialFirstResponder_(field)
+        if alert.runModal() != AppKit.NSAlertFirstButtonReturn:
             return
         try:
             self._flush()
-            layout_files.write(str(panel.URL().path()), self.settings_store.current())
+            name = layout_files.save_named(self.settings_store.path, str(field.stringValue()), self.settings_store.current())
+            self._reload_layout_choices(name)
             self._say('Layout saved.', 'ink_2')
         except (OSError, ValueError) as exc:
+            self._say(str(exc), 'fault')
+
+    @objc.python_method
+    def _reload_layout_choices(self, selected=''):
+        from core import layout_files
+        try:
+            names = sorted(layout_files.saved_layouts(self.settings_store.path), key=str.casefold)
+            self.layout_choice.set_choices([('', 'Choose a saved layout…')] + [(name, name) for name in names])
+            self.layout_choice.value = selected
+        except (OSError, ValueError):
+            self.logger.exception('Could not read saved Crossing layouts')
+
+    @objc.python_method
+    def _choose_saved_layout(self, name):
+        from core import layout_files
+        if not name:
+            return
+        try:
+            tiles = layout_files.validate(layout_files.saved_layouts(self.settings_store.path)[name])
+            self._flush()
+            self.controller.crossing_event(crossing_state.restore_layout, tiles, **self._crossing_args())
+            self._load_ways()
+            self._reflect()
+            self._say('Layout loaded: ' + name, 'ink_2')
+        except (OSError, ValueError, KeyError, SettingsError) as exc:
+            self.layout_choice.value = ''
             self._say(str(exc), 'fault')
 
     def loadCrossingLayout_(self, _sender):
@@ -3230,6 +3268,9 @@ class ControlWindow(AppKit.NSObject):
             self.controller.crossing_event(crossing_state.restore_layout, tiles, **self._crossing_args())
             self._load_ways()
             self._reflect()
+            imported = {**self.settings_store.current(), 'layout': tiles}
+            name = layout_files.save_named(self.settings_store.path, Path(str(panel.URL().path())).stem, imported)
+            self._reload_layout_choices(name)
             self._say('Layout loaded.', 'ink_2')
         except (OSError, ValueError, SettingsError) as exc:
             self._say(str(exc), 'fault')

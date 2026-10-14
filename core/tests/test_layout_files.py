@@ -2,12 +2,35 @@ import copy
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from core import crossing_state, layout_files
 from core.tests.test_crossing_state import OWN, A, B, settings, tile
 
 
 class LayoutFilesTests(unittest.TestCase):
+    def test_named_layouts_persist_and_replacing_one_preserves_the_others(self):
+        root = Path(__file__).resolve().parents[2] / 'renders' / 'test-tmp'
+        root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=root) as directory:
+            path = Path(directory) / 'settings.json'
+            self.assertEqual(layout_files.saved_layouts(path), {})
+            held = settings()
+            layout_files.save_named(path, ' Bureau ', held)
+            layout_files.save_named(path, 'Thuis – laptop', held)
+            held['layout'][A]['x'] = 400
+            layout_files.save_named(path, 'bureau', held)
+            saved = layout_files.saved_layouts(path)
+            self.assertEqual(set(saved), {'Bureau', 'Thuis – laptop'})
+            self.assertEqual(saved['Bureau']['tiles'][A]['x'], 400)
+            self.assertEqual(saved['Thuis – laptop']['tiles'][A]['x'], 160)
+            before = path.with_name('saved-layouts.json').read_bytes()
+            with patch('core.layout_files.os.replace', side_effect=OSError('Cannot replace')):
+                with self.assertRaises(OSError):
+                    layout_files.save_named(path, 'Extra', held)
+            self.assertEqual(path.with_name('saved-layouts.json').read_bytes(), before)
+            self.assertEqual([p.name for p in Path(directory).iterdir()], ['saved-layouts.json'])
+
     def test_roundtrip_restores_positions_and_sizes_without_connection_secrets(self):
         held = settings()
         held['layout'][OWN] = tile(displays={'0': dict(x=0, y=0, w=1920, h=1080)})

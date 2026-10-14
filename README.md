@@ -100,8 +100,9 @@ to PC A and two to PC B can be arranged as A–B–A with the second B below the
 a third PC can be placed anywhere in the same map. Status refreshes preserve a screen being dragged.
 Drag a screen card's lower-right grip to make it wider, taller, smaller or larger independently.
 These saved sizes belong to the shared map and do not change a monitor's resolution.
-Use **Save layout** to keep a Crossing picture as a JSON file, and **Load layout** to restore it.
-You can keep several files for different setups. Positions and custom screen sizes are restored
+Use **Save layout** to keep a Crossing picture under a name, then select it from the saved-layout
+dropdown to restore it. The list persists across restarts. **Import layout** adds an existing JSON
+layout file to that list. Positions and custom screen sizes are restored
 and shared with connected PCs; current monitor geometry and pairing details are retained.
 
 The **Identify screens** button at the top right briefly shows matching codes such as A1, A2

@@ -46,18 +46,19 @@ def position(widget, root):
 class CrossingPageParityTests(unittest.TestCase):
     def test_layout_save_and_load_buttons_restore_the_saved_picture(self):
         from core import layout_files
-        path = Path(self.tempdir.name) / 'desk.json'
-        with patch.object(kvm.QFileDialog, 'getSaveFileName', return_value=(str(path), '')):
+        with patch.object(kvm.QInputDialog, 'getText', return_value=('Desk', True)):
             self.window.save_layout_button.click()
-        picture = layout_files.read(path)
+        picture = layout_files.validate(layout_files.saved_layouts(self.path)['Desk'])
         held = app_config.load_settings(self.path)
         for tile in held['layout'].values():
             tile['x'] += 50
         app_config.write_settings(self.path, held)
         self.window._read_crossing()
-        with patch.object(kvm.QFileDialog, 'getOpenFileName', return_value=(str(path), '')), \
-                patch.object(self.window, '_send_same') as send, patch.object(self.window, '_tell'):
-            self.window.load_layout_button.click()
+        self.window._reload_layout_choices()
+        with patch.object(self.window, '_send_same') as send, patch.object(self.window, '_tell'):
+            index = self.window.layout_choice.findData('Desk')
+            self.window.layout_choice.setCurrentIndex(index)
+            self.window.layout_choice.activated.emit(index)
         restored = app_config.load_settings(self.path)
         for machine, tile in picture.items():
             self.assertEqual(restored['layout'][machine]['x'], tile['x'])

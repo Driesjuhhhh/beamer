@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QFileDialog,
+    QInputDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -1896,13 +1897,18 @@ class WindowsApplication(QWidget):
         self.save_layout_button = QPushButton("Save layout")
         self.save_layout_button.clicked.connect(self._save_crossing_layout)
         header.addWidget(self.save_layout_button)
-        self.load_layout_button = QPushButton("Load layout")
+        self.load_layout_button = QPushButton("Import layout")
         self.load_layout_button.clicked.connect(self._load_crossing_layout)
         header.addWidget(self.load_layout_button)
         self.identify_screens_button = QPushButton("Identify screens")
         self.identify_screens_button.clicked.connect(self._identify_screens)
         header.addWidget(self.identify_screens_button)
         module.body.insertLayout(0, header)
+        self.layout_choice = QComboBox()
+        self.layout_choice.setToolTip('Choose a saved Crossing layout')
+        self.layout_choice.activated.connect(self._choose_saved_layout)
+        module.body.addWidget(self.layout_choice)
+        self._reload_layout_choices()
         self.atlas_canvas = AtlasCanvas(
             on_drop=self._layout_dropped, on_rename=self._rename_canvas_peer,
             on_leave_out=self._canvas_left_out, on_cycle=self._set_shortcut_cycle,
@@ -1941,14 +1947,42 @@ class WindowsApplication(QWidget):
 
     def _save_crossing_layout(self):
         from core import layout_files
-        path, _ = QFileDialog.getSaveFileName(self, 'Save Crossing layout', 'Crossing-layout.json', 'Beamer layouts (*.json)')
-        if not path:
+        name, accepted = QInputDialog.getText(self, 'Save Crossing layout', 'Layout name (an existing name replaces that layout):')
+        if not accepted:
             return
         try:
-            layout_files.write(path, self._crossing_settings())
+            name = layout_files.save_named(self.config_path, name, self._crossing_settings())
+            self._reload_layout_choices(name)
             self.atlas_canvas.announce('Layout saved.')
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, 'Save layout failed', str(exc))
+
+    def _reload_layout_choices(self, selected=None):
+        from core import layout_files
+        self.layout_choice.clear()
+        self.layout_choice.addItem('Choose a saved layout…', None)
+        try:
+            for name in sorted(layout_files.saved_layouts(self.config_path), key=str.casefold):
+                self.layout_choice.addItem(name, name)
+            self.layout_choice.setCurrentIndex(max(0, self.layout_choice.findData(selected)))
+        except (OSError, ValueError):
+            LOGGER.exception('Could not read saved Crossing layouts')
+
+    @_crossing_refresh
+    def _choose_saved_layout(self, index):
+        from core import layout_files
+        name = self.layout_choice.itemData(index)
+        if name is None:
+            return
+        try:
+            tiles = layout_files.validate(layout_files.saved_layouts(self.config_path)[name])
+            with app_config.SETTINGS_LOCK:
+                settings = app_config.load_settings(self.config_path)
+                self._carry_crossing(crossing_state.restore_layout(settings, tiles, **self._crossing_event_args()))
+            self.atlas_canvas.announce('Layout loaded: ' + name)
+        except (OSError, ValueError, KeyError, ConfigError) as exc:
+            self.layout_choice.setCurrentIndex(0)
+            QMessageBox.warning(self, 'Load layout failed', str(exc))
 
     @_crossing_refresh
     def _load_crossing_layout(self):
@@ -1962,6 +1996,9 @@ class WindowsApplication(QWidget):
                 settings = app_config.load_settings(self.config_path)
                 outcome = crossing_state.restore_layout(settings, tiles, **self._crossing_event_args())
                 self._carry_crossing(outcome)
+            imported = {**self._crossing_settings(), 'layout': tiles}
+            name = layout_files.save_named(self.config_path, Path(path).stem, imported)
+            self._reload_layout_choices(name)
             self.atlas_canvas.announce('Layout loaded.')
         except (OSError, ValueError, ConfigError) as exc:
             QMessageBox.warning(self, 'Load layout failed', str(exc))
@@ -2070,6 +2107,7 @@ class WindowsApplication(QWidget):
                 self.atlas_canvas.announce("That position cannot connect this machine.")
                 return False
             self._carry_crossing(outcome)
+        self.layout_choice.setCurrentIndex(0)
         return True
 
     def _crossing_event_args(self) -> dict:
